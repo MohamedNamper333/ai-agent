@@ -21,14 +21,22 @@ class Tool:
 
 
 class ToolRegistry:
-    def __init__(self):
+    def __init__(self, agent: Any = None):
         self._tools: dict[str, Tool] = {}
+        self._agent = agent
         self._register_defaults()
         self._register_file_tools()
         self._register_web_tools()
         self._register_git_tools()
         self._register_code_tools()
         self._register_data_tools()
+        self._register_long_term_memory()
+        self._register_multi_agent()
+        self._register_document_tools()
+        self._register_voice_tools()
+        self._register_scheduler()
+        self._register_docker_tools()
+        self._register_self_improve()
 
     def _register_defaults(self):
         self.register(Tool(
@@ -204,6 +212,142 @@ class ToolRegistry:
         except Exception as e:
             return f"Error: {e}"
 
+    def _register_long_term_memory(self):
+        from tools.long_term_memory import LongTermMemory
+        self._ltm = LongTermMemory()
+
+        self.register(Tool(
+            "recall",
+            "Search long-term memory for past conversations. Params: query",
+            self._ltm.search,
+        ))
+        self.register(Tool(
+            "remember",
+            "Store an important fact in long-term memory. Params: summary, topics (comma-separated)",
+            lambda summary, topics="": self._ltm.add_summary("manual", summary, [t.strip() for t in topics.split(",") if t.strip()]) or f"Stored: {summary[:100]}..." if True else "",
+        ))
+
+    def _register_multi_agent(self):
+        from tools.multi_agent import MultiAgentOrchestrator
+        self._orchestrator = MultiAgentOrchestrator()
+
+        self.register(Tool(
+            "council",
+            "Convene multiple specialist agents to analyze a problem. Params: task, context (optional)",
+            self._orchestrator.run_council,
+        ))
+        self.register(Tool(
+            "delegate",
+            "Delegate a task to a specialist agent (The Analyst, The Programmer, The Reviewer). Params: agent_name, task, context (optional)",
+            self._orchestrator.delegate,
+        ))
+
+    def _register_document_tools(self):
+        from tools.documents import DocumentTools
+        dt = DocumentTools()
+
+        self.register(Tool(
+            "read_pdf",
+            "Extract text from a PDF file. Params: file_path, max_pages (optional, default 20)",
+            dt.read_pdf,
+        ))
+        self.register(Tool(
+            "read_docx",
+            "Extract text from a Word DOCX file. Params: file_path",
+            dt.read_docx,
+        ))
+        self.register(Tool(
+            "analyze_image",
+            "Analyze an image file: format, size, colors, OCR. Params: file_path",
+            dt.analyze_image,
+        ))
+        self.register(Tool(
+            "ocr_image",
+            "Extract text from an image using OCR. Params: file_path",
+            dt.ocr_image,
+        ))
+
+    def _register_voice_tools(self):
+        from tools.voice import VoiceTools
+        vt = VoiceTools()
+
+        self.register(Tool(
+            "listen",
+            "Listen to microphone and convert speech to text. Params: timeout (optional, default 5s)",
+            vt.listen,
+        ))
+        self.register(Tool(
+            "speak",
+            "Convert text to speech and play it. Params: text",
+            vt.speak,
+        ))
+        self.register(Tool(
+            "save_speech",
+            "Convert text to speech and save as MP3 file. Params: text, file_path (optional)",
+            vt.save_speech,
+        ))
+
+    def _register_scheduler(self):
+        from tools.scheduler import TaskScheduler
+        self._scheduler = TaskScheduler()
+        self._scheduler.load()
+
+        self.register(Tool(
+            "schedule_task",
+            "Schedule a recurring task for the agent. Params: name, prompt, schedule (minutes or HH:MM), task_type (interval/daily)",
+            self._scheduler.add_task,
+        ))
+        self.register(Tool(
+            "list_scheduled_tasks",
+            "List all scheduled tasks",
+            lambda: "\n".join(f"{t['id']}: {t['name']} ({t['schedule']}) - enabled={t['enabled']}" for t in self._scheduler.list_tasks()) or "No tasks scheduled",
+        ))
+        self.register(Tool(
+            "remove_scheduled_task",
+            "Remove a scheduled task. Params: task_id",
+            self._scheduler.remove_task,
+        ))
+
+    def _register_docker_tools(self):
+        from tools.docker_sandbox import DockerSandbox
+        ds = DockerSandbox()
+
+        self.register(Tool(
+            "docker_run",
+            "Execute code in an isolated Docker container (secure). Params: code, language (python/bash/node, default python), timeout (default 30)",
+            ds.run_code,
+        ))
+        self.register(Tool(
+            "docker_images",
+            "List available Docker images",
+            ds.list_images,
+        ))
+
+    def _register_self_improve(self):
+        from tools.self_improve import SelfImprover
+        self._improver = SelfImprover()
+
+        self.register(Tool(
+            "self_analyze",
+            "Analyze the agent's own codebase structure",
+            self._improver.analyze_codebase,
+        ))
+        self.register(Tool(
+            "self_review",
+            "Run a full code review of the agent's own code and suggest improvements",
+            self._improver.run_self_review,
+        ))
+        self.register(Tool(
+            "suggest_improvements",
+            "Suggest specific improvements for a code file. Params: file_path",
+            self._improver.suggest_improvements,
+        ))
+        self.register(Tool(
+            "apply_improvement",
+            "Apply a code improvement to a file. Params: file_path, instructions",
+            self._improver.apply_improvement,
+        ))
+
     def register(self, tool: Tool) -> None:
         self._tools[tool.name] = tool
 
@@ -219,11 +363,18 @@ class ToolRegistry:
         lines = ["## Available Tools", ""]
         categories = {
             "Basic": ["datetime", "calculator", "run_code", "search_memory"],
+            "Memory": ["recall", "remember"],
             "File Operations": ["read_file", "write_file", "edit_file", "glob", "grep", "list_dir", "file_info"],
             "Web": ["fetch_url", "search_web"],
             "Git": ["git_status", "git_diff", "git_log", "git_branch", "git_show"],
             "Code Analysis": ["scan_project", "review_code", "analyze_imports"],
             "Data Analysis": ["analyze_csv", "analyze_json", "analyze_text", "stats_summary"],
+            "Documents & Images": ["read_pdf", "read_docx", "analyze_image", "ocr_image"],
+            "Voice": ["listen", "speak", "save_speech"],
+            "Multi-Agent": ["council", "delegate"],
+            "Scheduling": ["schedule_task", "list_scheduled_tasks", "remove_scheduled_task"],
+            "Docker Sandbox": ["docker_run", "docker_images"],
+            "Self-Improvement": ["self_analyze", "self_review", "suggest_improvements", "apply_improvement"],
         }
 
         for cat, names in categories.items():

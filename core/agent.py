@@ -14,8 +14,43 @@ class Agent:
     ):
         self.model = model or LLM()
         self.memory = memory or ConversationMemory()
-        self.tools = tools or ToolRegistry()
+        self.tools = tools or ToolRegistry(agent=self)
         self.context = context or ContextManager()
+        self.plugins = None
+
+        self._load_plugins()
+        self._start_scheduler()
+
+    def _load_plugins(self):
+        try:
+            from plugins import PluginRegistry
+            self.plugins = PluginRegistry()
+            self.plugins.discover_and_load(self)
+            for plugin in self.plugins.plugins:
+                for tool_def in plugin.get_tools():
+                    from core.tools import Tool
+                    self.tools.register(Tool(
+                        tool_def["name"],
+                        tool_def["description"],
+                        tool_def["func"],
+                    ))
+        except Exception as e:
+            print(f"[agent] Plugin load: {e}")
+
+    def _start_scheduler(self):
+        try:
+            scheduler = getattr(self.tools, '_scheduler', None)
+            if scheduler:
+                scheduler.set_callback(self._on_scheduled_task)
+                scheduler.start()
+        except Exception:
+            pass
+
+    def _on_scheduled_task(self, name: str, prompt: str):
+        print(f"\n[Scheduler] Running: {name}")
+        result = self.chat(prompt, stream=False)
+        print(f"[Scheduler] Done: {name}")
+        return result
 
     def start_new_conversation(self, conversation_id: str = "") -> str:
         return self.memory.new_conversation(conversation_id)
@@ -24,15 +59,37 @@ class Agent:
         self.memory.add_message("user", user_input)
         self.memory.load()
 
+        try:
+            ltm = getattr(self.tools, '_ltm', None)
+            if ltm:
+                recall = ltm.get_context(user_input)
+                if recall:
+                    user_input = f"{recall}\n\nUser: {user_input}"
+        except Exception:
+            pass
+
         tool_desc = self.tools.format_for_prompt()
         history = self.memory.format_for_llm(self.context.system_prompt, include_system=False)
 
         if not stream:
             response = self._run_agent_loop(user_input, tool_desc, history)
             self.memory.add_message("assistant", response)
+            self._auto_summarize(response, user_input)
             return response
         else:
             return self._stream_agent_loop(user_input, tool_desc, history)
+
+    def _auto_summarize(self, response: str, user_input: str):
+        try:
+            msgs = self.memory.get_history()
+            if len(msgs) > 20:
+                ltm = getattr(self.tools, '_ltm', None)
+                if ltm:
+                    topic = user_input[:50].strip()
+                    summary = f"User asked about: {topic[:80]}. Agent responded with {len(response)} chars."
+                    ltm.add_summary(self.memory.current_id, summary, [topic])
+        except Exception:
+            pass
 
     def _build_system_prompt(self, user_input: str, tool_desc: str, history: str,
                               tool_results: list[dict] | None = None) -> str:
@@ -67,18 +124,15 @@ class Agent:
             tool_results = self.tools.parse_and_execute(response)
             for tr in tool_results:
                 self.memory.add_message("system", f"Tool '{tr['tool']}': {tr['result'][:300]}")
-
             prompt = self._build_system_prompt(
                 user_input, tool_desc, history, tool_results
             )
             response = self.model.generate(prompt)
-
         return response
 
     def _stream_agent_loop(self, user_input: str, tool_desc: str, history: str):
         prompt = self._build_system_prompt(user_input, tool_desc, history)
         full_response = ""
-
         for chunk in self.model.generate(prompt, stream=True):
             full_response += chunk
             yield chunk
@@ -90,7 +144,6 @@ class Agent:
             tool_results = self.tools.parse_and_execute(full_response)
             for tr in tool_results:
                 self.memory.add_message("system", f"Tool '{tr['tool']}': {tr['result'][:300]}")
-
             prompt = self._build_system_prompt(
                 user_input, tool_desc, history, tool_results
             )
@@ -98,7 +151,6 @@ class Agent:
             for chunk in self.model.generate(prompt, stream=True):
                 full_response += chunk
                 yield chunk
-
         self.memory.add_message("assistant", full_response)
 
     def get_history(self) -> list[dict]:
