@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Agent</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <div id="sidebar">
+    <div id="sidebar-header">
+      <h2>AI Agent</h2>
+      <button id="new-chat-btn" title="New conversation">+</button>
+    </div>
+    <div id="conv-list"></div>
+    <div id="sidebar-footer">
+      <div class="status-dot" id="status-dot"></div>
+      <span id="status-text">loading...</span>
+    </div>
+  </div>
+  <div id="main">
+    <div id="messages"></div>
+    <div id="input-area">
+      <div id="rag-info">
+        <label class="rag-toggle">
+          <input type="checkbox" id="rag-toggle">
+          <span>RAG</span>
+        </label>
+        <button id="upload-btn" title="Upload documents">📄</button>
+        <input type="file" id="file-input" multiple accept=".txt,.md,.py,.json,.csv,.pdf" hidden>
+      </div>
+      <div id="input-row">
+        <textarea id="user-input" rows="1" placeholder="Type your message..." autofocus></textarea>
+        <button id="send-btn">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

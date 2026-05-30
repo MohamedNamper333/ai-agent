@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.venv/
+models/*.gguf
+memory_store.json
+vector_store.json
+*.log
+.DS_Store
