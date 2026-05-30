@@ -269,13 +269,14 @@ body {
   padding: 0;
   display: flex;
   flex-direction: column;
+  align-items: center;
 }
 
 #messages:empty + #welcome { display: flex; }
 
-#messages .message:first-child { margin-top: auto; }
-
 .message {
+  width: 100%;
+  max-width: 760px;
   padding: 16px 24px;
   line-height: 1.7;
   font-size: 15px;
@@ -293,69 +294,93 @@ body {
 .message.user {
   background: transparent;
   padding: 20px 24px 4px;
-  max-width: 100%;
-  align-self: flex-end;
+  text-align: center;
 }
 
 .message .user-label {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-  margin-bottom: 6px;
+  margin-bottom: 10px;
 }
 
 .message .user-avatar {
-  width: 28px; height: 28px;
+  width: 32px; height: 32px;
   border-radius: 50%;
-  background: var(--primary);
+  background: linear-gradient(135deg, #a855f7, #ec4899);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: 13px;
   color: #fff;
-  font-weight: 600;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(168, 85, 247, 0.3);
 }
 
 .message .user-name {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text);
 }
 
 .message .message-content {
-  padding-left: 36px;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 14px 18px;
+  display: inline-block;
+  min-width: 60px;
+  max-width: 100%;
+}
+
+.message.user .message-content {
+  background: linear-gradient(135deg, rgba(108, 92, 231, 0.15), rgba(168, 85, 247, 0.1));
+  border-color: rgba(108, 92, 231, 0.3);
 }
 
 .message.assistant {
   background: transparent;
   padding: 4px 24px 20px;
-  max-width: 100%;
-  align-self: flex-start;
 }
 
 .message .assistant-avatar-row {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 .message .assistant-avatar {
-  width: 28px; height: 28px;
+  width: 32px; height: 32px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--primary), #a855f7);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: 13px;
   color: #fff;
   font-weight: 700;
+  box-shadow: 0 2px 8px var(--primary-glow);
 }
 
 .message .assistant-name {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text);
+}
+
+.message.assistant .message-content {
+  text-align: left;
+  background: var(--assistant-bg);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 14px 18px;
+  display: inline-block;
+  min-width: 60px;
+  max-width: 100%;
 }
 
 .message .message-content p {

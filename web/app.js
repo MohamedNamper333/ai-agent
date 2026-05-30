@@ -151,7 +151,12 @@ function addMessage(role, content, msgId, animate = true) {
     div.className = 'message user';
     div.innerHTML = `
       <div class="user-label">
-        <div class="user-avatar">M</div>
+        <div class="user-avatar">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+          <circle cx="12" cy="7" r="4"/>
+        </svg>
+      </div>
         <span class="user-name">You</span>
       </div>
       <div class="message-content">${escHtml(content)}</div>
@@ -293,10 +298,35 @@ async function sendMessage() {
   inputEl.focus();
 }
 
+// ─── Image Upload Warning ───
+function showImageWarning() {
+  const warningEl = document.createElement('div');
+  warningEl.className = 'message assistant';
+  warningEl.innerHTML = `
+    <div class="assistant-avatar-row">
+      <div class="assistant-avatar">🖼</div>
+      <span class="assistant-name">System</span>
+    </div>
+    <div class="message-content" style="border-color: #ff9800;">
+      ⚠️ This model doesn't support image analysis. To use image features:
+      <br><br>
+      • <b>Option 1:</b> Install a vision model in Ollama:<br>
+      <code>ollama pull llava</code> or <code>ollama pull bakllava</code>
+      <br><br>
+      • <b>Option 2:</b> OCR text from images is available via<br>
+      <code>pip install pytesseract Pillow</code>
+      <br><br>
+      • <b>Option 3:</b> The file is uploaded to RAG for text search.
+    </div>
+  `;
+  messagesEl.appendChild(warningEl);
+  scrollToBottom();
+}
+
 // ─── Toast ───
 let toastTimer;
 
-function showToast(msg) {
+function showToast(msg, duration = 2000) {
   const toast = document.getElementById('toast');
   if (!toast) return;
   clearTimeout(toastTimer);
@@ -306,7 +336,7 @@ function showToast(msg) {
   toastTimer = setTimeout(() => {
     toast.classList.remove('show');
     toast.classList.add('hidden');
-  }, 2000);
+  }, duration);
 }
 
 // ─── Event listeners ───
@@ -369,15 +399,35 @@ document.getElementById('upload-label').onclick = function(e) {
 fileInput.onchange = async () => {
   const files = fileInput.files;
   if (!files.length) return;
-  showToast(`Uploading ${files.length} file(s)...`);
+
+  const imageFiles = [];
+  const docFiles = [];
+
   for (const file of files) {
-    const formData = new FormData();
-    formData.append('file', file);
-    try {
-      await fetch(`${API_BASE}/upload`, { method: 'POST', body: formData });
-    } catch {}
+    if (file.type.startsWith('image/')) {
+      imageFiles.push(file.name);
+    } else {
+      docFiles.push(file);
+    }
   }
-  showToast('Upload complete! Use RAG mode to query your files.');
+
+  if (imageFiles.length > 0) {
+    showImageWarning();
+    showToast(`Images uploaded to RAG. Use a vision model (llava) for AI analysis.`, 4000);
+  }
+
+  if (docFiles.length > 0 || imageFiles.length > 0) {
+    showToast(`Uploading ${files.length} file(s)...`);
+    for (const file of files) {
+      const formData = new FormData();
+      formData.append('file', file);
+      try {
+        await fetch(`${API_BASE}/upload`, { method: 'POST', body: formData });
+      } catch {}
+    }
+    showToast('Upload complete! Use RAG mode to query your files.', 3000);
+  }
+
   fileInput.value = '';
 };
 
