@@ -10,33 +10,75 @@
 <div id="app">
   <div id="sidebar">
     <div id="sidebar-header">
-      <h2>AI Agent</h2>
+      <div class="logo">
+        <span class="logo-icon">⟁</span>
+        <span class="logo-text">AI Agent</span>
+      </div>
       <button id="new-chat-btn" title="New conversation">+</button>
     </div>
     <div id="conv-list"></div>
     <div id="sidebar-footer">
-      <div class="status-dot" id="status-dot"></div>
-      <span id="status-text">loading...</span>
+      <div class="status-indicator">
+        <div class="status-dot" id="status-dot"></div>
+        <span id="status-text">initializing...</span>
+      </div>
+      <div class="tools-badge" id="tools-badge">46 tools</div>
     </div>
   </div>
+
   <div id="main">
+    <div id="welcome" class="welcome-screen">
+      <div class="welcome-icon">⟁</div>
+      <h1>How can I help you?</h1>
+      <div class="suggestions">
+        <div class="suggestion-chip" data-prompt="Review the code in this project for bugs">
+          <span>🔍</span> Review my code
+        </div>
+        <div class="suggestion-chip" data-prompt="Analyze the structure of this project">
+          <span>📁</span> Analyze project
+        </div>
+        <div class="suggestion-chip" data-prompt="Write a Python script to organize my files">
+          <span>🐍</span> Write a script
+        </div>
+        <div class="suggestion-chip" data-prompt="Search the web for the latest AI news">
+          <span>🌐</span> Search the web
+        </div>
+      </div>
+    </div>
     <div id="messages"></div>
     <div id="input-area">
-      <div id="rag-info">
-        <label class="rag-toggle">
-          <input type="checkbox" id="rag-toggle">
-          <span>RAG</span>
+      <div id="toolbar">
+        <button id="rag-btn" class="toolbar-btn" title="Toggle RAG (retrieve from uploaded docs)">
+          <span>📚</span> RAG
+        </button>
+        <button id="council-btn" class="toolbar-btn" title="Convene multi-agent council">
+          <span>🧠</span> Council
+        </button>
+        <label class="toolbar-btn" id="upload-label" title="Upload files">
+          <span>📎</span> Upload
+          <input type="file" id="file-input" multiple accept=".txt,.md,.py,.json,.csv,.pdf,.docx,.png,.jpg" hidden>
         </label>
-        <button id="upload-btn" title="Upload documents">📄</button>
-        <input type="file" id="file-input" multiple accept=".txt,.md,.py,.json,.csv,.pdf" hidden>
       </div>
       <div id="input-row">
-        <textarea id="user-input" rows="1" placeholder="Type your message..." autofocus></textarea>
-        <button id="send-btn">Send</button>
+        <textarea id="user-input" rows="1" placeholder="Ask me anything..." autofocus></textarea>
+        <button id="send-btn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+        </button>
+      </div>
+      <div id="rag-indicator" class="rag-indicator hidden">
+        <span>📚 RAG active</span>
+        <button id="rag-close">×</button>
       </div>
     </div>
   </div>
 </div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.1/marked.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

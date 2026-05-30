@@ -83,6 +83,15 @@ async def get_status():
     }
 
 
+@app.get("/stats")
+async def get_stats():
+    return {
+        "tool_count": len(agent.tools.list_tools()),
+        "plugin_count": len(agent.plugins.plugins) if agent.plugins else 0,
+        "model_loaded": model_loaded,
+    }
+
+
 @app.post("/conversations/new")
 async def new_conversation():
     cid = agent.memory.new_conversation()
@@ -103,6 +112,14 @@ async def get_conversation(conv_id: str):
         raise HTTPException(404, "Conversation not found")
     msgs = agent.memory.get_history(conv_id)
     return {"conversation_id": conv_id, "messages": msgs}
+
+
+@app.delete("/conversations/{conv_id}")
+async def delete_conversation(conv_id: str):
+    if conv_id in agent.memory.conversations:
+        agent.memory.delete_conversation(conv_id)
+        return {"status": "deleted"}
+    raise HTTPException(404, "Conversation not found")
 
 
 @app.post("/chat")
@@ -131,6 +148,17 @@ async def chat(req: ChatRequest):
             enriched = req.message
     else:
         enriched = req.message
+
+    # Multi-agent council route
+    msg_lower = req.message.lower()
+    if '/council' in msg_lower or 'council this' in msg_lower:
+        topic = req.message.replace('/council', '').replace('council this', '').strip()
+        from tools.multi_agent import MultiAgentOrchestrator
+        council = MultiAgentOrchestrator(model=agent.model)
+        result = council.run_council(topic or enriched)
+        agent.memory.add_message("user", enriched)
+        agent.memory.add_message("assistant", result)
+        return {"text": result, "council": True}
 
     if req.stream:
         async def event_stream():
