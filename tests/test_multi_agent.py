@@ -378,6 +378,19 @@ class TestMultiAgentOrchestratorGroupConsensus(unittest.TestCase):
         result = self.orch.group_consensus("task", ["A", "B"])
         self.assertIn("B", result)
 
+    def test_skips_malformed_vote_or_confidence(self):
+        responses = [
+            json.dumps({"vote": 1, "reason": "r1", "confidence": 0.5}),
+            json.dumps({"vote": "A", "reason": "r2", "confidence": 0.5}),
+            json.dumps({"vote": 2, "reason": "r3", "confidence": "high"}),
+            json.dumps({"vote": 1, "reason": "r4", "confidence": 0.5}),
+        ]
+        self.orch.model.generate.side_effect = responses
+        result = self.orch.group_consensus("task", ["A", "B"])
+        self.assertIsInstance(result, str)
+        self.assertNotIn("No consensus", result)
+        self.assertIn("A", result)
+
 
 class TestMultiAgentOrchestratorGetSpecialistInfo(unittest.TestCase):
     def setUp(self):

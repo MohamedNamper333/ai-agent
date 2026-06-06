@@ -233,15 +233,20 @@ class MultiAgentOrchestrator:
             except Exception:
                 continue
 
-        if not votes:
-            return "No consensus could be reached (no votes collected)."
-
         weighted_votes = {}
+        valid_votes = []
         for v in votes:
-            idx = int(v.get("vote", 0)) - 1
-            confidence = float(v.get("confidence", 0.5))
+            try:
+                idx = int(v.get("vote", 0)) - 1
+                confidence = float(v.get("confidence", 0.5))
+            except (TypeError, ValueError):
+                continue
+            valid_votes.append(v)
             if 0 <= idx < len(options):
                 weighted_votes[idx] = weighted_votes.get(idx, 0) + confidence
+
+        if not valid_votes:
+            return "No consensus could be reached (no votes collected)."
 
         result = [f"## Group Consensus Analysis\n"]
         result.append(f"Task: {task}\n")
@@ -254,7 +259,7 @@ class MultiAgentOrchestrator:
         winner = max(weighted_votes, key=weighted_votes.get) if weighted_votes else 0
         result.append(f"\n### Winner: {options[winner]}")
         result.append(f"\n### Individual Votes")
-        for i, v in enumerate(votes):
+        for i, v in enumerate(valid_votes):
             result.append(f"  {self.specialists[i].name if i < len(self.specialists) else f'Agent {i}'}: "
                          f"Option {v.get('vote', '?')} ({float(v.get('confidence', 0)):.0%} confidence)")
 
