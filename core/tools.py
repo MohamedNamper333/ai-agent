@@ -132,12 +132,14 @@ class ToolRegistry:
     def enable_tool(self, name: str) -> bool:
         if name in self._tools:
             self._enabled.add(name)
+            self._invalidate_cache()
             return True
         return False
 
     def disable_tool(self, name: str) -> bool:
         if name in self._tools:
             self._enabled.discard(name)
+            self._invalidate_cache()
             return True
         return False
 
@@ -147,6 +149,8 @@ class ToolRegistry:
             if tool.category == category:
                 self._enabled.add(tool.name)
                 count += 1
+        if count:
+            self._invalidate_cache()
         return count
 
     def disable_category(self, category: str) -> int:
@@ -155,6 +159,8 @@ class ToolRegistry:
             if tool.category == category:
                 self._enabled.discard(tool.name)
                 count += 1
+        if count:
+            self._invalidate_cache()
         return count
 
     def is_enabled(self, name: str) -> bool:
@@ -765,9 +771,14 @@ class ToolRegistry:
             category="self_improve",
         ))
 
+    def _invalidate_cache(self) -> None:
+        self._list_cache = None
+        self._format_prompt_cache = None
+
     def register(self, tool: Tool) -> None:
         self._tools[tool.name] = tool
         self._enabled.add(tool.name)
+        self._invalidate_cache()
 
     def get(self, name: str) -> Tool | None:
         for cat in list(self._lazy_loaders.keys()):
@@ -776,8 +787,12 @@ class ToolRegistry:
         return self._tools.get(name)
 
     def list_tools(self) -> list[Tool]:
+        if self._list_cache is not None:
+            return self._list_cache
         self._ensure_all()
-        return [t for t in self._tools.values() if t.name in self._enabled]
+        result = [t for t in self._tools.values() if t.name in self._enabled]
+        self._list_cache = result
+        return result
 
     def list_all_tools(self) -> list[Tool]:
         self._ensure_all()
@@ -811,6 +826,8 @@ class ToolRegistry:
                 self._ensure_category(cat)
 
     def format_for_prompt(self) -> str:
+        if self._format_prompt_cache is not None:
+            return self._format_prompt_cache
         if not self._tools:
             return ""
         total = len(self._tools)
@@ -848,7 +865,9 @@ class ToolRegistry:
             "Or for legacy format: <tool name=\"tool_name\">param=value</tool>\n"
             "Then wait for the result before continuing."
         )
-        return "\n".join(lines)
+        result = "\n".join(lines)
+        self._format_prompt_cache = result
+        return result
 
     def parse_and_execute(self, text: str) -> tuple[list[dict], list[dict]]:
         calls = []

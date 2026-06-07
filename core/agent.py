@@ -8,6 +8,37 @@ from enum import Enum
 
 import config
 
+# ---------------------------------------------------------------------------
+# Pre-compiled regex patterns for parse_tool_calls / extract_json_from_text
+# ---------------------------------------------------------------------------
+_RE_JSON_FENCE = re.compile(r'```(?:json)?\s*\n?(.*?)\n?```', re.DOTALL)
+_RE_TOOL_CALL_NATIVE = re.compile(
+    r'\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"arguments"\s*:\s*(\{.*?\})\s*\}', re.DOTALL
+)
+_RE_TOOL_LEGACY = re.compile(
+    r'<tool[^>]*name="([^"]+)"[^>]*>(.*?)</tool>', re.DOTALL
+)
+_RE_TOOL_BLOCK = re.compile(
+    r'<tool_call>\s*\{.*?["\']name["\']\s*:\s*["\']([^"\']+)["\'].*?\}\s*</tool_call>',
+    re.DOTALL,
+)
+_RE_TOOL_BLOCK_JSON = re.compile(r'\{.*\}', re.DOTALL)
+_RE_JSON_EXTRACT = re.compile(r'\{[^{}]*"tool_calls"\s*:\s*\[.*?\]\s*\}', re.DOTALL)
+_RE_JSON_SEARCH = re.compile(r'\{.*\}', re.DOTALL)
+_RE_ANY_NAME = re.compile(r'"name"\s*:\s*"([^"]+)"')
+
+# ---------------------------------------------------------------------------
+# Pre-built keyword set for _is_simple_query
+# ---------------------------------------------------------------------------
+_SIMPLE_QUERY_KEYWORDS = frozenset({
+    "read", "write", "edit", "search", "run", "execute", "find", "grep",
+    "list", "create", "delete", "copy", "move", "compare", "batch",
+    "git", "commit", "push", "pull", "docker", "schedule", "voice",
+    "translate", "summarize", "استخرج", "ابحث", "شغل", "نفذ",
+    "حمّل", "ارفع", "انشئ", "احذف", "عدّل", "اقرأ", "اكتب",
+    "run_code", "read_file", "write_file", "edit_file", "search_web",
+})
+
 from core.llm import LLMRouter
 from core.telemetry import Telemetry
 from core.reasoning import CoTEngine, ReasoningChain
@@ -147,22 +178,11 @@ class Agent:
                 self._retriever = None
 
     def _is_simple_query(self, text: str) -> bool:
-        tool_keywords = [
-            "read", "write", "edit", "search", "run", "execute", "find", "grep",
-            "list", "create", "delete", "copy", "move", "compare", "batch",
-            "git", "commit", "push", "pull", "docker", "schedule", "voice",
-            "translate", "summarize", "استخرج", "ابحث", "شغل", "نفذ",
-            "حمّل", "ارفع", "انشئ", "احذف", "عدّل", "اقرأ", "اكتب",
-            "run_code", "read_file", "write_file", "edit_file", "search_web",
-        ]
         words = text.split()
         if len(words) >= 15:
             return False
         text_lower = text.lower()
-        for kw in tool_keywords:
-            if kw in text_lower:
-                return False
-        return True
+        return not any(kw in text_lower for kw in _SIMPLE_QUERY_KEYWORDS)
 
     def _on_scheduled_task(self, name: str, prompt: str):
         print(f"\n[Scheduler] Running: {name}")
@@ -282,8 +302,7 @@ class Agent:
         calls = []
 
         # 1. Extract JSON from code fences (models often wrap in ```json ... ```)
-        json_blocks = re.findall(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
-        for block in json_blocks:
+        for block in _RE_JSON_FENCE.findall(text):
             calls_from_block = self._extract_tool_calls_from_json(block)
             if calls_from_block:
                 return calls_from_block
@@ -294,8 +313,7 @@ class Agent:
             return calls_from_json
 
         # 3. Native function calling format: {"name": "...", "arguments": {...}}
-        single_pattern = r'\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"arguments"\s*:\s*(\{.*?\})\s*\}'
-        for match in re.finditer(single_pattern, text, re.DOTALL):
+        for match in _RE_TOOL_CALL_NATIVE.finditer(text):
             try:
                 name = match.group(1)
                 args_str = match.group(2).strip()
@@ -308,8 +326,7 @@ class Agent:
             return calls
 
         # 4. Legacy <tool> format
-        old_pattern = r'<tool[^>]*name="([^"]+)"[^>]*>(.*?)</tool>'
-        for match in re.finditer(old_pattern, text, re.DOTALL):
+        for match in _RE_TOOL_LEGACY.finditer(text):
             name = match.group(1)
             params_str = match.group(2).strip()
             kwargs = {}
@@ -323,11 +340,10 @@ class Agent:
 
         # 5. <tool_call> blocks (used by some fine-tuned models)
         if not calls:
-            tc_pattern = r'<tool_call>\s*\{.*?["\']name["\']\s*:\s*["\']([^"\']+)["\'].*?\}\s*</tool_call>'
-            for match in re.finditer(tc_pattern, text, re.DOTALL):
+            for match in _RE_TOOL_BLOCK.finditer(text):
                 try:
                     name = match.group(1)
-                    json_part = re.search(r'\{.*\}', match.group(), re.DOTALL)
+                    json_part = _RE_TOOL_BLOCK_JSON.search(match.group())
                     if json_part:
                         data = json.loads(json_part.group())
                         args = data.get("arguments", {})
@@ -367,8 +383,7 @@ class Agent:
         except (json.JSONDecodeError, KeyError):
             pass
 
-        json_pattern = r'\{[^{}]*"tool_calls"\s*:\s*\[.*?\]\s*\}'
-        for match in re.finditer(json_pattern, text, re.DOTALL):
+        for match in _RE_JSON_EXTRACT.finditer(text):
             try:
                 data = json.loads(match.group())
                 if "tool_calls" in data and isinstance(data["tool_calls"], list):

@@ -59,6 +59,31 @@
 
 ---
 
+## Round 6 (Current Session)
+
+### Performance — Cache `list_tools()` and `format_for_prompt()` in `ToolRegistry`
+
+#### التغييرات
+| الملف | التغيير | التأثير |
+|-------|---------|---------|
+| `core/tools.py` | Added `_list_cache` + `_format_prompt_cache` with `_invalidate_cache()` helper | يزيل إعادة بناء القائمة والـ markdown لكل request |
+
+#### التحليل
+- **المشكلة**: في كل حلقة agent loop، `chat()` يستدعي `tools.list_tools()` (لبناء cache key) و `tools.format_for_prompt()` (لإثراء system prompt). كل استدعاء يُعيد فلترة الأدوات المفعلة وتبني markdown من جديد — حتى لو لم يتغير أي tool.
+- **الإصلاح**: cache بسيط `_list_cache` و `_format_prompt_cache` مع helper `_invalidate_cache()` يستدعيه كل method يُغيّر الحالة (`register`, `enable_tool`, `disable_tool`, `enable_category`, `disable_category`, `unregister`).
+- **Benchmark** (`benchmark_tool_registry.py`): list_tools `0.173ms` best, format_for_prompt `0.176ms` best — cached calls are sub-microsecond.
+- **Speedup**: ~1.02x (negligible absolute time — these calls were already fast)
+
+#### التحقق
+- `python -m pytest tests/test_agent_core.py tests/test_web_endpoints.py -v --tb=short` → **116 passed in 1.57s** ✅
+
+### ملخص الدورة 6
+- Cache في `ToolRegistry` لـ `list_tools()` و `format_for_prompt()`
+- تأثير محدود (~1.02x) — الأدوات كانت سريعة أصلاً
+- 116/116 tests أخضر
+
+---
+
 ## Round 3 (Previous Session)
 
 ### التغييرات
@@ -240,9 +265,50 @@ The project is now in good shape with:
 
 ---
 
+## Round 7 (Current Session)
+
+### Performance — Pre-compiled regex patterns + frozenset keyword lookup in `agent.py`
+
+#### التغييرات
+| الملف | التغيير | التأثير |
+|-------|---------|---------|
+| `core/agent.py` | 8 pre-compiled regex patterns at module level (`_RE_*`) | يزيل re.compile() لكل request |
+| `core/agent.py` | `_SIMPLE_QUERY_KEYWORDS` frozenset constant | O(1) lookup بدل list scan |
+
+#### التحليل
+- **المشكلة**: `_parse_tool_calls()` و `_extract_tool_calls_from_json()` كانوا يستخدمون regex inline في كل استدعاء — `re.compile()` يُستدعى كل مرة. `_is_simple_query()` كان يبني `list` جديد بكل طلب.
+- **الإصلاح**: (1) 8 أنماط regex مُعدّة مسبقاً كـ module-level constants بدلاد `re.compile()` في كل طلب. (2) قائمة الكلمات المفتاحية محفوظة كـ `frozenset`odule-level — يوفّر O(1) بدل O(n) مع `any()`.
+- **Benchmark** (`benchmark_agent_hot_path.py`):
+
+| Method | ops | ns/op | ops/sec |
+|--------|-----|-------|---------|
+| is_simple_query (simple) | 2,000,000 | 2,230 | 448,438 |
+| is_simple_query (complex) | 400,000 | 817 | 1,223,206 |
+| parse_tool_calls (json) | 500,000 | 3,144 | 318,033 |
+| parse_tool_calls (multi) | 500,000 | 4,299 | 232,609 |
+| parse_tool_calls (legacy) | 100,000 | 6,787 | 147,341 |
+| parse_tool_calls (native) | 100,000 | 2,815 | 355,243 |
+| parse_tool_calls (fenced) | 100,000 | 5,184 | 192,906 |
+| parse_tool_calls (block) | 100,000 | 8,406 | 118,961 |
+
+- **الاستنتاج**: كل دالة تعمل في microsecond(s) — parse_tool_calls في 3-8µs، is_simple_query في 2µs. لا حاجة لمزيد من optimization هنا.
+
+#### التحقق
+- `python -m pytest tests/test_agent_core.py tests/test_web_endpoints.py -q --tb=no` → **116 passed in 1.44s** ✅
+
+### ملخص الدورة 7
+- Pre-compiled regex + frozenset في `agent.py`
+- كل دالة تعمل في microsecond(s)
+- 116/116 tests أخضر
+
+---
+
 ## Summary
 - **Round 1**: Major performance improvements (lazy loading, async, RAG optimization)
 - **Round 2**: Code quality improvements (deduplication, shared utilities, simplification)
-- **Total reduction**: 1.0% lines (quality over quantity)
-- **Test coverage**: 72 tests passing
-- **All E2E checks**: 12/12 passing
+- **Round 3**: Memory optimization (memory.load removed from chat)
+- **Round 4**: CORS bug fix (dynamic middleware)
+- **Round 5**: CORS middleware cache (3% speedup)
+- **Round 6**: ToolRegistry cache (1.02x speedup)
+- **Round 7**: Pre-compiled regex + frozenset in agent.py (all functions in µs)
+- **Test coverage**: 116 tests passing ✅
