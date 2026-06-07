@@ -4,6 +4,11 @@ import argparse
 import sys
 import os
 
+if sys.platform == "win32" and "pytest" not in sys.modules:
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from core.model import LLM
@@ -35,8 +40,8 @@ def run_cli(args):
     agent.memory.load()
     agent.memory.new_conversation()
 
-    print_colored("\nAI Agent ready! Type your messages.", "cyan")
-    print_colored("Commands: /new /tools /quit", "yellow")
+    print_colored("\nAI Agent ready! Type your messages. / الوكيل جاهز! اكتب رسالتك.", "cyan")
+    print_colored("Commands / أوامر: /new /tools /fast /rag /quit", "yellow")
     print_colored("─" * 50, "bold")
 
     while True:
@@ -48,14 +53,69 @@ def run_cli(args):
 
         if not user_input:
             continue
-        if user_input.lower() == "/quit":
+
+        cmd = user_input.lower()
+
+        if cmd == "/quit":
             break
-        elif user_input.lower() == "/new":
+        elif cmd == "/new":
             agent.memory.new_conversation()
             print_colored("New conversation started.", "cyan")
             continue
-        elif user_input.lower() == "/tools":
-            print(agent.tools.format_for_prompt())
+        elif cmd == "/tools":
+            print_colored("── Tools ──", "bold")
+            print(f"Enabled: {agent.tools.get_enabled_count()}/{len(agent.tools.list_all_tools())}")
+            print()
+            cats = agent.tools.list_tools_by_category_all()
+            for cat, tools in sorted(cats.items()):
+                statuses = []
+                for t in tools:
+                    icon = "ON" if agent.tools.is_enabled(t.name) else "OFF"
+                    statuses.append(f"  {t.name} [{icon}]")
+                label = cat.title()
+                print(f" {label}:")
+                for s in statuses:
+                    print(s)
+                print()
+            print("Usage: /tools enable <name> | /tools disable <name>")
+            print("       /tools on <category> | /tools off <category>")
+            continue
+        elif cmd.startswith("/tools enable "):
+            name = cmd[14:].strip()
+            if agent.tools.enable_tool(name):
+                print_colored(f"Tool '{name}' enabled", "green")
+            else:
+                print_colored(f"Unknown tool: {name}", "red")
+            continue
+        elif cmd.startswith("/tools disable "):
+            name = cmd[15:].strip()
+            if agent.tools.disable_tool(name):
+                print_colored(f"Tool '{name}' disabled", "yellow")
+            else:
+                print_colored(f"Unknown tool: {name}", "red")
+            continue
+        elif cmd.startswith("/tools on "):
+            cat = cmd[10:].strip()
+            count = agent.tools.enable_category(cat)
+            print_colored(f"Enabled {count} tools in category '{cat}'", "green")
+            continue
+        elif cmd.startswith("/tools off "):
+            cat = cmd[11:].strip()
+            count = agent.tools.disable_category(cat)
+            print_colored(f"Disabled {count} tools in category '{cat}'", "yellow")
+            continue
+        elif cmd == "/fast":
+            if agent._fast_mode == "on":
+                agent._fast_mode = "off"
+                print_colored("Fast Mode: OFF", "yellow")
+            else:
+                agent._fast_mode = "on"
+                print_colored("Fast Mode: ON", "green")
+            continue
+        elif cmd == "/rag":
+            config.RAG_ENABLED = not config.RAG_ENABLED
+            status = "ON" if config.RAG_ENABLED else "OFF"
+            print_colored(f"RAG: {status}", "green" if config.RAG_ENABLED else "yellow")
             continue
 
         print_colored("AI: ", "green", end="")

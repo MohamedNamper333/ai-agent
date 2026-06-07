@@ -1,303 +1,226 @@
-"""Chain-of-Thought engine.
+"""Chain-of-Thought Engine.
 
-The engine is intentionally small. It:
-
-1. Builds a single user message that asks the LLM to "think step by
-   step" up to ``MAX_STEPS`` steps.
-2. Parses the response line-by-line into :class:`ReasoningStep` records.
-3. Surfaces the first line that starts with ``Final:`` as the answer.
-4. Approximates a confidence score in :attr:`ReasoningChain.confidence`
-   so callers can decide whether to retry or escalate to a verifier
-   (W2).
-
-The engine works with any object that exposes ``generate(LLMRequest)``.
-That includes :class:`core.llm.LLMRouter` and the legacy
-``core.model.LLM``.
+Workflow:
+  1. Build a prompt with few-shot examples for the requested level.
+  2. Call the LLM router (which picks a free model).
+  3. Parse the response into a ReasoningChain.
+  4. Return the chain (downstream code can take just .final_answer).
 """
-
 from __future__ import annotations
 
+import logging
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
-from core.llm.base import LLMRequest
-from core.reasoning.prompts import CoTPrompts
+from core.llm import (
+    LLMRequest,
+    ReasoningLevel,
+    normalize_level,
+)
+
+
+logger = logging.getLogger(__name__)
 
 
 MAX_STEPS = 5
 CONFIDENCE_THRESHOLD = 0.7
-UNCERTAIN_MARKERS = (
-    "i'm not sure",
-    "i am not sure",
-    "i don't know",
-    "not enough information",
-    "unclear",
-    "cannot determine",
-    "maybe",
-    "perhaps",
-    "possibly",
-    "i think",
-    "might be",
-    "not certain",
-    "uncertain",
-)
 
 
 @dataclass
 class ReasoningStep:
-    index: int
+    """A single step in a CoT chain."""
+
+    step_number: int
     thought: str
     action: str
-    observation: str
+    confidence: float
 
-    def to_line(self) -> str:
-        return CoTPrompts.format_step(
-            self.index, self.thought, self.action, self.observation
-        )
+    def is_high_confidence(self) -> bool:
+        return self.confidence >= CONFIDENCE_THRESHOLD
 
 
 @dataclass
 class ReasoningChain:
-    question: str = ""
+    """Full chain-of-thought output for a query."""
+
+    query: str
     steps: list[ReasoningStep] = field(default_factory=list)
-    answer: str = ""
+    final_answer: str = ""
+    total_confidence: float = 0.0
+    level: ReasoningLevel = ReasoningLevel.MODERATE
+    model: str = ""
+    latency_ms: float = 0.0
     raw: str = ""
-    confidence: float = 0.0
-    latency_ms: int = 0
-    duration_steps: int = 0
 
     @property
-    def ok(self) -> bool:
-        return bool(self.answer) and self.confidence >= CONFIDENCE_THRESHOLD
+    def step_count(self) -> int:
+        return len(self.steps)
+
+    @property
+    def avg_confidence(self) -> float:
+        if not self.steps:
+            return 0.0
+        return sum(s.confidence for s in self.steps) / len(self.steps)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "query": self.query,
+            "steps": [
+                {
+                    "step_number": s.step_number,
+                    "thought": s.thought,
+                    "action": s.action,
+                    "confidence": s.confidence,
+                }
+                for s in self.steps
+            ],
+            "final_answer": self.final_answer,
+            "total_confidence": self.total_confidence,
+            "avg_confidence": self.avg_confidence,
+            "level": self.level.value,
+            "model": self.model,
+            "latency_ms": self.latency_ms,
+        }
 
 
-_STEP_HEADER = re.compile(r"^\s*step\s+(\d+)\s*[:.\-]\s*(.*)$", re.IGNORECASE)
-_FINAL_HEADER = re.compile(r"^\s*final\s*[:.\-]\s*(.*)$", re.IGNORECASE)
+_STEP_RE = re.compile(
+    r"Step\s+(\d+)\s*:\s*(.+?)\s*\|\s*(.+?)\s*\|\s*confidence\s*:\s*([0-9]*\.?[0-9]+)",
+    re.IGNORECASE | re.DOTALL,
+)
+_FINAL_RE = re.compile(
+    r"Final\s+answer\s*:\s*(.+?)\s*$",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 class CoTEngine:
-    """Synchronous CoT executor.
+    """Engine that prompts an LLM to produce a chain of thought."""
 
-    Parameters
-    ----------
-    router : object
-        Anything with a ``generate(LLMRequest)`` method that returns
-        ``str | Iterator[str]``. Accepts both :class:`LLMRouter` and the
-        legacy ``LLM`` (the router exposes the same shape).
-    prompts : CoTPrompts
-        Prompt templates. Override for tests.
-    max_steps : int
-        Hard cap on the number of steps the prompt asks the LLM for.
-        The engine itself does not truncate the response.
-    """
+    def __init__(self, llm_router: Any = None, max_steps: int = MAX_STEPS):
+        from .prompts import CoTPrompts
 
-    def __init__(self, router: Any, prompts: Optional[CoTPrompts] = None, max_steps: int = MAX_STEPS) -> None:
-        self.router = router
-        self.prompts = prompts or CoTPrompts()
+        self.prompts = CoTPrompts
+        self.llm = llm_router
         self.max_steps = max(1, int(max_steps))
+
+    def _resolve_llm(self) -> Any:
+        if self.llm is not None:
+            return self.llm
+        from core.llm import LLMRouter
+
+        self.llm = LLMRouter()
+        return self.llm
 
     def think(
         self,
-        question: str,
-        context: str = "",
-        level: str = "deep",
+        query: str,
+        level: Union[ReasoningLevel, str] = ReasoningLevel.MODERATE,
+        system: Optional[str] = None,
     ) -> ReasoningChain:
-        chain = ReasoningChain(question=question)
-        user_prompt = self.prompts.user_template.format(
-            prompt=question.strip(),
-            context=(context or "(none)").strip(),
-            max_steps=self.max_steps,
-        )
+        """Run CoT on a query, return a ReasoningChain.
+
+        Args:
+            query: question / task to reason about
+            level: simple | moderate | deep (drives few-shot template + model)
+            system: optional system message override
+
+        Returns:
+            ReasoningChain with steps, final_answer, total_confidence
+        """
+        lvl = normalize_level(level)
+        prompt = self.prompts.build_prompt(query, level=lvl.value)
+        system_msg = system or self.prompts.build_system_message()
+
+        llm = self._resolve_llm()
         request = LLMRequest(
-            prompt=f"{self.prompts.system}\n\n{user_prompt}",
-            max_tokens=1024,
-            temperature=0.2,
-            metadata={"level": level},
+            prompt=prompt,
+            system=system_msg,
+            max_tokens=1500,
+            temperature=0.3,
+            level=lvl,
         )
-        start = time.monotonic()
+
+        start = time.time()
         try:
-            response = self.router.generate(request)
-        except Exception as exc:  # pragma: no cover - defensive
-            chain.answer = ""
-            chain.confidence = 0.0
-            chain.raw = f"<router error: {exc}>"
-            chain.latency_ms = int((time.monotonic() - start) * 1000)
-            return chain
+            response = llm.generate_full(request)
+            text = response.text or ""
+        except Exception as e:
+            logger.error("CoT LLM call failed: %s", e)
+            return ReasoningChain(
+                query=query,
+                final_answer=f"[CoT failed: {e}]",
+                level=lvl,
+                latency_ms=(time.time() - start) * 1000,
+            )
+        latency_ms = (time.time() - start) * 1000
 
-        text = _coerce_to_text(response)
-        chain.raw = text
-        chain.latency_ms = int((time.monotonic() - start) * 1000)
+        return self._parse_response(
+            query=query,
+            text=text,
+            level=lvl,
+            model=response.model,
+            latency_ms=latency_ms,
+        )
 
-        chain.steps, final_answer = _parse_response(text)
-        chain.answer = final_answer
-        chain.duration_steps = len(chain.steps)
-        chain.confidence = _estimate_confidence(chain)
-        return chain
-
-    async def think_async(
+    def _parse_response(
         self,
-        question: str,
-        context: str = "",
-        level: str = "deep",
+        query: str,
+        text: str,
+        level: ReasoningLevel,
+        model: str,
+        latency_ms: float,
     ) -> ReasoningChain:
-        """Async variant; delegates to ``router.agenerate`` if available."""
-        chain = ReasoningChain(question=question)
-        user_prompt = self.prompts.user_template.format(
-            prompt=question.strip(),
-            context=(context or "(none)").strip(),
-            max_steps=self.max_steps,
-        )
-        request = LLMRequest(
-            prompt=f"{self.prompts.system}\n\n{user_prompt}",
-            max_tokens=1024,
-            temperature=0.2,
-            metadata={"level": level},
-        )
-        start = time.monotonic()
-        agenerate = getattr(self.router, "agenerate", None)
-        try:
-            if agenerate is None:
-                text = _coerce_to_text(self.router.generate(request))
-            else:
-                response = await agenerate(request)
-                text = _coerce_to_text(response)
-        except Exception as exc:  # pragma: no cover - defensive
-            chain.raw = f"<router error: {exc}>"
-            chain.latency_ms = int((time.monotonic() - start) * 1000)
-            return chain
-        chain.raw = text
-        chain.latency_ms = int((time.monotonic() - start) * 1000)
-        chain.steps, final_answer = _parse_response(text)
-        chain.answer = final_answer
-        chain.duration_steps = len(chain.steps)
-        chain.confidence = _estimate_confidence(chain)
-        return chain
-
-
-# -- helpers ----------------------------------------------------------------
-
-
-def _coerce_to_text(response: Any) -> str:
-    if isinstance(response, str):
-        return response
-    if hasattr(response, "text") and isinstance(getattr(response, "text", None), str):
-        return response.text
-    if hasattr(response, "__iter__") and not isinstance(response, (list, tuple)):
-        try:
-            return "".join(str(chunk) for chunk in response)
-        except TypeError:
-            pass
-    if isinstance(response, (list, tuple)):
-        return "".join(str(c) for c in response)
-    return str(response)
-
-
-def _parse_response(text: str) -> tuple[list[ReasoningStep], str]:
-    steps: list[ReasoningStep] = []
-    final_answer = ""
-
-    for raw_line in (text or "").splitlines():
-        line = raw_line.rstrip()
-        if not line:
-            continue
-        m_final = _FINAL_HEADER.match(line)
-        if m_final:
-            final_answer = m_final.group(1).strip()
-            continue
-        m_step = _STEP_HEADER.match(line)
-        if m_step:
+        steps: list[ReasoningStep] = []
+        total_confidence = 0.0
+        for m in _STEP_RE.finditer(text or ""):
             try:
-                index = int(m_step.group(1))
-            except (TypeError, ValueError):
-                index = len(steps) + 1
-            payload = m_step.group(2)
-            thought, action, observation = _split_step_payload(payload)
+                step_num = int(m.group(1))
+            except ValueError:
+                continue
+            thought = m.group(2).strip()
+            action = m.group(3).strip()
+            try:
+                conf = float(m.group(4))
+            except ValueError:
+                conf = 0.5
+            conf = max(0.0, min(1.0, conf))
             steps.append(
                 ReasoningStep(
-                    index=index,
+                    step_number=step_num,
                     thought=thought,
                     action=action,
-                    observation=observation,
+                    confidence=conf,
                 )
             )
+            total_confidence += conf
+        steps = steps[: self.max_steps]
 
-    # If the LLM never emitted a ``Final:`` line, fall back to the
-    # last observation, which is a common CoT idiom.
-    if not final_answer and steps:
-        last = steps[-1]
-        if last.observation and last.observation != "(none)":
-            final_answer = last.observation
-        elif last.thought and last.thought != "(none)":
-            final_answer = last.thought
+        final_answer = ""
+        fa = _FINAL_RE.search(text or "")
+        if fa:
+            final_answer = fa.group(1).strip()
+        else:
+            lines = [ln.strip() for ln in (text or "").strip().splitlines() if ln.strip()]
+            final_answer = lines[-1] if lines else (text or "").strip()
 
-    return steps, final_answer
+        return ReasoningChain(
+            query=query,
+            steps=steps,
+            final_answer=final_answer,
+            total_confidence=total_confidence,
+            level=level,
+            model=model,
+            latency_ms=latency_ms,
+            raw=text or "",
+        )
 
+    def think_simple(self, query: str) -> str:
+        return self.think(query, level=ReasoningLevel.SIMPLE).final_answer
 
-def _split_step_payload(payload: str) -> tuple[str, str, str]:
-    """Extract thought/action/observation from a step body.
+    def think_moderate(self, query: str) -> str:
+        return self.think(query, level=ReasoningLevel.MODERATE).final_answer
 
-    Accepts several separator styles: 'Thought=...; Action=...; ...',
-    'Thought: ... Action: ...', or a single free-form string.
-    """
-    payload = payload.strip()
-    if not payload:
-        return "", "", ""
-
-    # Try key=value first.
-    if "=" in payload:
-        thought = _value_after_key(payload, "thought")
-        action = _value_after_key(payload, "action")
-        observation = _value_after_key(payload, "observation")
-        return thought, action, observation
-
-    # Try key: value next.
-    thought = _value_after_key(payload, "thought", sep=":")
-    action = _value_after_key(payload, "action", sep=":")
-    observation = _value_after_key(payload, "observation", sep=":")
-    if thought or action or observation:
-        return thought, action, observation
-
-    # Free-form: best-effort split on ';' or '.' boundaries.
-    return payload, "", ""
-
-
-def _value_after_key(payload: str, key: str, sep: str = "=") -> str:
-    """Pick the substring after ``key<sep>`` up to the next ``;`` or end."""
-    needle = f"{key}{sep}"
-    lower = payload.lower()
-    idx = lower.find(needle)
-    if idx < 0:
-        return ""
-    start = idx + len(needle)
-    rest = payload[start:]
-    nxt = rest.find(";")
-    if nxt < 0:
-        return rest.strip()
-    return rest[:nxt].strip()
-
-
-def _estimate_confidence(chain: ReasoningChain) -> float:
-    """Heuristic 0-1 score used by the agent to decide whether to retry."""
-    if not chain.answer:
-        return 0.0
-    if any(marker in chain.answer.lower() for marker in UNCERTAIN_MARKERS):
-        return 0.2
-    if any(marker in chain.raw.lower() for marker in UNCERTAIN_MARKERS):
-        return 0.4
-    base = 0.5
-    # More structured steps → higher confidence, capped at 1.0.
-    base += min(0.4, 0.08 * chain.duration_steps)
-    if chain.duration_steps == 0:
-        return 0.3
-    return min(1.0, base)
-
-
-__all__ = [
-    "CoTEngine",
-    "ReasoningChain",
-    "ReasoningStep",
-    "MAX_STEPS",
-    "CONFIDENCE_THRESHOLD",
-]
+    def think_deep(self, query: str) -> str:
+        return self.think(query, level=ReasoningLevel.DEEP).final_answer

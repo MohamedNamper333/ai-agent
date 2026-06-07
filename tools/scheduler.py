@@ -1,4 +1,4 @@
-"""Task Scheduling - periodic and scheduled tasks"""
+"""Task Scheduling - periodic, daily, and one-time tasks"""
 
 import json
 import os
@@ -15,10 +15,12 @@ class TaskScheduler:
     def __init__(self, db_path: str = ""):
         self.db_path = db_path or str(Path(config.BASE_DIR) / "scheduled_tasks.json")
         self.tasks: list[dict] = []
+        self._lock = threading.Lock()
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._callback: Optional[Callable] = None
         self._loaded = False
+        self._history: list[dict] = []
 
     def load(self):
         if self._loaded:
@@ -26,7 +28,12 @@ class TaskScheduler:
         if os.path.exists(self.db_path):
             try:
                 with open(self.db_path, "r", encoding="utf-8") as f:
-                    self.tasks = json.load(f)
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        self.tasks = data.get("tasks", [])
+                        self._history = data.get("history", [])
+                    else:
+                        self.tasks = data
             except Exception:
                 self.tasks = []
         self._loaded = True
@@ -35,6 +42,9 @@ class TaskScheduler:
         self._callback = callback
 
     def add_task(self, name: str, prompt: str, schedule: str, task_type: str = "interval") -> dict:
+        if task_type not in ("interval", "daily", "once"):
+            return {"error": "task_type must be 'interval', 'daily', or 'once'"}
+
         task = {
             "id": f"task_{int(time.time())}_{len(self.tasks)}",
             "name": name,
@@ -45,22 +55,56 @@ class TaskScheduler:
             "last_run": "",
             "next_run": self._calculate_next_run(schedule, task_type),
             "created": datetime.now().isoformat(),
+            "run_count": 0,
         }
-        self.tasks.append(task)
+
+        with self._lock:
+            self.tasks.append(task)
         self._save()
         return task
 
     def remove_task(self, task_id: str) -> bool:
-        for i, t in enumerate(self.tasks):
-            if t["id"] == task_id:
-                self.tasks.pop(i)
-                self._save()
-                return True
+        with self._lock:
+            for i, t in enumerate(self.tasks):
+                if t["id"] == task_id:
+                    self.tasks.pop(i)
+                    self._save()
+                    return True
+        return False
+
+    def enable_task(self, task_id: str) -> bool:
+        with self._lock:
+            for t in self.tasks:
+                if t["id"] == task_id:
+                    t["enabled"] = True
+                    self._save()
+                    return True
+        return False
+
+    def disable_task(self, task_id: str) -> bool:
+        with self._lock:
+            for t in self.tasks:
+                if t["id"] == task_id:
+                    t["enabled"] = False
+                    self._save()
+                    return True
         return False
 
     def list_tasks(self) -> list[dict]:
         self.load()
-        return self.tasks
+        with self._lock:
+            return list(self.tasks)
+
+    def get_task(self, task_id: str) -> Optional[dict]:
+        self.load()
+        with self._lock:
+            for t in self.tasks:
+                if t["id"] == task_id:
+                    return dict(t)
+        return None
+
+    def get_history(self, limit: int = 20) -> list[dict]:
+        return self._history[-limit:]
 
     def start(self):
         if self._running:
@@ -76,22 +120,47 @@ class TaskScheduler:
         while self._running:
             self.load()
             now = datetime.now()
-            for task in self.tasks:
-                if not task.get("enabled", True):
-                    continue
-                next_run = task.get("next_run", "")
-                if next_run and now >= datetime.fromisoformat(next_run):
-                    try:
-                        if self._callback:
-                            self._callback(task["name"], task["prompt"])
-                    except Exception:
-                        pass
-                    finally:
-                        task["last_run"] = now.isoformat()
-                        task["next_run"] = self._calculate_next_run(
-                            task["schedule"], task.get("task_type", "interval")
-                        )
-                        self._save()
+            with self._lock:
+                for task in self.tasks:
+                    if not task.get("enabled", True):
+                        continue
+                    next_run = task.get("next_run", "")
+                    if next_run and now >= datetime.fromisoformat(next_run):
+                        try:
+                            if self._callback:
+                                result = self._callback(task["name"], task["prompt"])
+                                self._history.append({
+                                    "task_id": task["id"],
+                                    "task_name": task["name"],
+                                    "prompt": task["prompt"],
+                                    "result": str(result)[:500] if result else "",
+                                    "timestamp": now.isoformat(),
+                                    "status": "success",
+                                })
+                        except Exception as e:
+                            self._history.append({
+                                "task_id": task["id"],
+                                "task_name": task["name"],
+                                "error": str(e),
+                                "timestamp": now.isoformat(),
+                                "status": "failed",
+                            })
+                        finally:
+                            task["last_run"] = now.isoformat()
+                            task["run_count"] = task.get("run_count", 0) + 1
+
+                            if task.get("task_type") == "once":
+                                task["enabled"] = False
+                                task["next_run"] = ""
+                            else:
+                                task["next_run"] = self._calculate_next_run(
+                                    task["schedule"], task.get("task_type", "interval")
+                                )
+
+                            if len(self._history) > 100:
+                                self._history = self._history[-100:]
+
+                            self._save()
             time.sleep(15)
 
     def _calculate_next_run(self, schedule: str, task_type: str) -> str:
@@ -111,11 +180,17 @@ class TaskScheduler:
                 return next_run.isoformat()
             except Exception:
                 return (now + timedelta(hours=24)).isoformat()
+        elif task_type == "once":
+            return (now + timedelta(seconds=5)).isoformat()
         return (now + timedelta(hours=1)).isoformat()
 
     def _save(self):
         try:
+            data = {
+                "tasks": self.tasks,
+                "history": self._history,
+            }
             with open(self.db_path, "w", encoding="utf-8") as f:
-                json.dump(self.tasks, f, ensure_ascii=False, indent=2)
+                json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception:
             pass

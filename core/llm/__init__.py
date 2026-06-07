@@ -1,40 +1,25 @@
-"""core.llm — provider-agnostic LLM abstraction layer.
+"""LLM Provider Abstraction Layer.
 
-Exposes the small surface that ``core/agent.py`` and tests consume.
-
-Public API
-----------
-BaseLLM, LLMRequest, LLMResponse, ReasoningLevel, LLMError
-LLMConfig
-OllamaProvider
-OpenAICompatProvider, build_opencode_zen
-LLMRouter
-FREE_MODELS
+Routes between free local (Ollama) and free cloud (OpenCode Zen) models.
+OpenCode Zen is OpenAI-compatible and free for the configured model tier.
 """
-
-from core.llm.base import (
+from .base import (
+    AllProvidersFailed,
     BaseLLM,
     LLMError,
     LLMRequest,
     LLMResponse,
+    ProviderUnavailable,
     ReasoningLevel,
+    normalize_level,
 )
-from core.llm.config import LLMConfig
-from core.llm.ollama_provider import OllamaProvider
-from core.llm.openai_compat_provider import (
-    OpenAICompatProvider,
-    build_opencode_zen,
-)
-from core.llm.router import (
-    DEFAULT_MODEL_BY_LEVEL,
-    DEEP_KEYWORDS,
-    FREE_MODELS,
-    LLMRouter,
-    LONG_CONTEXT_THRESHOLD,
-    MODERATE_KEYWORDS,
-)
+from .config import LLMConfig, get_llm_config
+from .ollama_provider import OllamaProvider
+from .opencode_zen_provider import OpenCodeZenProvider
+from .router import LLMRouter
 
 __all__ = [
+    "AllProvidersFailed",
     "BaseLLM",
     "LLMConfig",
     "LLMError",
@@ -42,12 +27,9 @@ __all__ = [
     "LLMResponse",
     "LLMRouter",
     "OllamaProvider",
-    "OpenAICompatProvider",
+    "OpenCodeZenProvider",
+    "ProviderUnavailable",
     "ReasoningLevel",
-    "build_opencode_zen",
-    "DEFAULT_MODEL_BY_LEVEL",
-    "DEEP_KEYWORDS",
-    "FREE_MODELS",
-    "LONG_CONTEXT_THRESHOLD",
-    "MODERATE_KEYWORDS",
+    "get_llm_config",
+    "normalize_level",
 ]

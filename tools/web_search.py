@@ -1,6 +1,7 @@
 import json
 import re
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
+from core.utils import strip_html
 
 
 class WebTools:
@@ -11,33 +12,24 @@ class WebTools:
             parsed = urlparse(url)
             if not parsed.scheme:
                 url = "https://" + url
-
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             }
-            r = requests.get(url, headers=headers, timeout=timeout)
+            r = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
             r.raise_for_status()
-
             content_type = r.headers.get("content-type", "").lower()
             if "json" in content_type:
                 try:
-                    data = r.json()
-                    return json.dumps(data, indent=2, ensure_ascii=False)[:5000]
+                    return json.dumps(r.json(), indent=2, ensure_ascii=False)[:8000]
                 except Exception:
                     pass
-
-            text = r.text
-            text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL | re.IGNORECASE)
-            text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
-            text = re.sub(r'<[^>]+>', ' ', text)
-            text = re.sub(r'\s+', ' ', text).strip()
-
-            max_chars = 8000
-            if len(text) > max_chars:
-                text = text[:max_chars] + "\n... (truncated)"
-
-            return f"URL: {url}\nLength: {len(r.text)} bytes\n\n{text[:max_chars]}"
-
+            if "xml" in content_type or "rss" in content_type:
+                return f"URL: {url}\nContent-Type: {content_type}\n\n{r.text[:5000]}"
+            text = strip_html(r.text)
+            if len(text) > 10000:
+                text = text[:10000] + "\n... (truncated)"
+            return f"URL: {url}\nStatus: {r.status_code}\nLength: {len(r.text)} bytes\n\n{text}"
         except ImportError:
             return "Error: requests library not installed (pip install requests)"
         except Exception as e:
@@ -47,78 +39,56 @@ class WebTools:
     def search_web(query: str, num_results: int = 5) -> str:
         try:
             import requests
-            url = f"https://html.duckduckgo.com/html/?q={requests.utils.quote(query)}"
+
+            encoded_query = quote(query)
+            urls_to_try = [
+                f"https://html.duckduckgo.com/html/?q={encoded_query}",
+                f"https://lite.duckduckgo.com/lite/?q={encoded_query}",
+            ]
+
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             }
-            r = requests.get(url, headers=headers, timeout=15)
-            r.raise_for_status()
 
-            from html.parser import HTMLParser
+            results = []
+            for url in urls_to_try:
+                try:
+                    r = requests.get(url, headers=headers, timeout=15)
+                    r.raise_for_status()
 
-            class ResultParser(HTMLParser):
-                def __init__(self):
-                    super().__init__()
-                    self.results = []
-                    self._current = {}
-                    self._in_result = False
-                    self._in_link = False
-                    self._in_snippet = False
-                    self._skip_a = 0
+                    result_pattern = r'<a[^>]*class="result__a"[^>]*>(.*?)</a>'
+                    snippet_pattern = r'<a[^>]*class="result__snippet"[^>]*>(.*?)</a>'
 
-                def handle_starttag(self, tag, attrs):
-                    attrs_dict = dict(attrs)
-                    if tag == "a" and "result__a" in attrs_dict.get("class", ""):
-                        self._in_link = True
-                        self._current["url"] = attrs_dict.get("href", "")
-                        self._current["title"] = ""
-                    if tag == "a" and self._in_link:
-                        pass
-                    if tag == "a" and "badge" in attrs_dict.get("class", ""):
-                        pass
+                    titles = re.findall(result_pattern, r.text, re.DOTALL)
+                    snippets = re.findall(snippet_pattern, r.text, re.DOTALL)
 
-                def handle_endtag(self, tag):
-                    if tag == "a" and self._in_link:
-                        self._in_link = False
-                        if "title" in self._current:
-                            self._in_result = True
+                    if not titles:
+                        result_pattern2 = r'<a[^>]*href="[^"]*"[^>]*class="result__a"[^>]*>(.*?)</a>'
+                        titles = re.findall(result_pattern2, r.text, re.DOTALL)
 
-                def handle_data(self, data):
-                    if self._in_link:
-                        self._current["title"] = self._current.get("title", "") + data
+                    for i, title in enumerate(titles[:num_results]):
+                        title_clean = re.sub(r'<[^>]+>', '', title).strip()
+                        snippet_clean = re.sub(r'<[^>]+>', '', snippets[i]).strip() if i < len(snippets) else ""
+                        if title_clean:
+                            results.append({
+                                "title": title_clean,
+                                "snippet": snippet_clean,
+                            })
 
-                def add_result(self, result_line):
-                    parts = result_line.split(" | ", 2)
-                    if len(parts) >= 2:
-                        self.results.append({
-                            "title": parts[0].strip(),
-                            "snippet": parts[1].strip() if len(parts) > 2 else "",
-                        })
+                    if results:
+                        break
+                except Exception:
+                    continue
 
-            parser = ResultParser()
-            parser.feed(r.text)
-
-            if not parser.results:
-                snippets = re.findall(
-                    r'<a[^>]*class="result__a"[^>]*>(.*?)</a>\s*<a[^>]*class="result__snippet"[^>]*>(.*?)</a>',
-                    r.text, re.DOTALL,
-                )
-                for title, snippet in snippets[:num_results]:
-                    title = re.sub(r'<[^>]+>', '', title).strip()
-                    snippet = re.sub(r'<[^>]+>', '', snippet).strip()
-                    parser.results.append({"title": title, "snippet": snippet})
-
-            if not parser.results:
-                return "No results found. Try a different search query."
+            if not results:
+                return f"No results found for: {query}"
 
             lines = [f"Search results for: {query}\n"]
-            for i, result in enumerate(parser.results[:num_results], 1):
-                t = result.get("title", "").strip()
-                s = result.get("snippet", "").strip()
-                if t:
-                    lines.append(f"{i}. {t}")
-                if s:
-                    lines.append(f"   {s[:200]}")
+            for i, result in enumerate(results[:num_results], 1):
+                lines.append(f"{i}. {result['title']}")
+                if result['snippet']:
+                    lines.append(f"   {result['snippet']}")
                 lines.append("")
 
             return "\n".join(lines).strip()
@@ -131,11 +101,136 @@ class WebTools:
     @staticmethod
     def web_scrape(url: str, selector: str = "") -> str:
         try:
-            from html.parser import HTMLParser
-        except ImportError:
-            return "Error: HTMLParser not available"
+            import requests
+            from urllib.parse import urlparse
 
-        content = WebTools.fetch_url(url, timeout=30)
-        if content.startswith("Error"):
-            return content
-        return content[:5000]
+            parsed = urlparse(url)
+            if not parsed.scheme:
+                url = "https://" + url
+
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            }
+
+            r = requests.get(url, headers=headers, timeout=30)
+            r.raise_for_status()
+
+            content_type = r.headers.get("content-type", "").lower()
+
+            if selector:
+                try:
+                    from bs4 import BeautifulSoup
+                    soup = BeautifulSoup(r.text, 'html.parser')
+                    elements = soup.select(selector)
+                    if elements:
+                        text_parts = [el.get_text(strip=True) for el in elements]
+                        result = f"Selector: {selector}\nElements found: {len(elements)}\n\n"
+                        result += "\n\n".join(text_parts[:20])
+                        return result[:8000]
+                    else:
+                        return f"No elements found for selector: {selector}"
+                except ImportError:
+                    pass
+
+            if "json" in content_type:
+                try:
+                    data = r.json()
+                    return json.dumps(data, indent=2, ensure_ascii=False)[:8000]
+                except Exception:
+                    pass
+
+            text = strip_html(r.text)
+            return f"URL: {url}\nStatus: {r.status_code}\n\n{text[:8000]}"
+
+        except ImportError:
+            return "Error: requests library not installed"
+        except Exception as e:
+            return f"Error scraping URL: {e}"
+
+    @staticmethod
+    def fetch_json(url: str) -> str:
+        try:
+            import requests
+            from urllib.parse import urlparse
+
+            parsed = urlparse(url)
+            if not parsed.scheme:
+                url = "https://" + url
+
+            headers = {
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "application/json",
+            }
+
+            r = requests.get(url, headers=headers, timeout=15)
+            r.raise_for_status()
+
+            data = r.json()
+            result = json.dumps(data, indent=2, ensure_ascii=False)
+            if len(result) > 10000:
+                result = result[:10000] + "\n... (truncated)"
+
+            return result
+
+        except ImportError:
+            return "Error: requests library not installed"
+        except Exception as e:
+            return f"Error fetching JSON: {e}"
+
+    @staticmethod
+    def rss_feed(url: str) -> str:
+        try:
+            import requests
+            from xml.etree import ElementTree
+
+            parsed = urlparse(url)
+            if not parsed.scheme:
+                url = "https://" + url
+
+            headers = {"User-Agent": "Mozilla/5.0"}
+            r = requests.get(url, headers=headers, timeout=15)
+            r.raise_for_status()
+
+            root = ElementTree.fromstring(r.text)
+
+            items = []
+            for item in root.iter('item'):
+                title = item.find('title')
+                link = item.find('link')
+                description = item.find('description')
+
+                items.append({
+                    "title": title.text if title is not None else "",
+                    "link": link.text if link is not None else "",
+                    "description": (description.text[:200] + "...") if description is not None and description.text else "",
+                })
+
+            if not items:
+                for item in root.iter('{http://www.w3.org/2005/Atom}entry'):
+                    title = item.find('{http://www.w3.org/2005/Atom}title')
+                    link = item.find('{http://www.w3.org/2005/Atom}link')
+                    summary = item.find('{http://www.w3.org/2005/Atom}summary')
+
+                    items.append({
+                        "title": title.text if title is not None else "",
+                        "link": link.get('href', '') if link is not None else "",
+                        "description": (summary.text[:200] + "...") if summary is not None and summary.text else "",
+                    })
+
+            if not items:
+                return f"No items found in feed: {url}"
+
+            lines = [f"RSS Feed: {url}", f"Items: {len(items)}", ""]
+            for i, item in enumerate(items[:10], 1):
+                lines.append(f"{i}. {item['title']}")
+                if item['link']:
+                    lines.append(f"   Link: {item['link']}")
+                if item['description']:
+                    lines.append(f"   {item['description']}")
+                lines.append("")
+
+            return "\n".join(lines)
+
+        except Exception as e:
+            return f"Error reading RSS feed: {e}"

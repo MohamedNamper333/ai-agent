@@ -1,15 +1,8 @@
-"""core.reasoning — Chain-of-Thought and (later) verifier/reflection.
+"""Reasoning Engine — Chain-of-Thought, Verification, Reflection.
 
-W1 ships the :class:`CoTEngine` plus its prompts. W2 will add the
-verifier and the reflection loop.
+W1 ships CoT only. Verifier and Reflection land in W2.
 """
+from .cot import CoTEngine, ReasoningChain, ReasoningStep
+from .prompts import CoTPrompts
 
-from core.reasoning.cot import CoTEngine, ReasoningChain, ReasoningStep
-from core.reasoning.prompts import CoTPrompts
-
-__all__ = [
-    "CoTEngine",
-    "ReasoningChain",
-    "ReasoningStep",
-    "CoTPrompts",
-]
+__all__ = ["CoTEngine", "ReasoningChain", "ReasoningStep", "CoTPrompts"]

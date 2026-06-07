@@ -39,17 +39,38 @@ class LongTermMemory:
     def search(self, query: str, top_k: int = 5) -> list[dict]:
         self.load()
         query_lower = query.lower()
+        query_words = set(query_lower.split())
+
         scored = []
         for s in self.summaries:
             score = 0
+
             if query_lower in s["summary"].lower():
-                score += 2
-            if any(query_lower in t.lower() for t in s.get("topics", [])):
                 score += 3
-            if query_lower in s["conversation_id"].lower():
-                score += 1
+
+            if any(query_lower in t.lower() for t in s.get("topics", [])):
+                score += 5
+
+            summary_words = set(s["summary"].lower().split())
+            word_overlap = len(query_words & summary_words)
+            score += word_overlap * 0.5
+
+            for topic in s.get("topics", []):
+                topic_words = set(topic.lower().split())
+                topic_overlap = len(query_words & topic_words)
+                score += topic_overlap * 0.3
+
+            try:
+                summary_time = datetime.fromisoformat(s["timestamp"])
+                days_old = (datetime.now() - summary_time).days
+                recency_bonus = max(0, 10 - days_old * 0.1)
+                score += recency_bonus
+            except Exception:
+                pass
+
             if score > 0:
                 scored.append((score, s))
+
         scored.sort(key=lambda x: x[0], reverse=True)
         return scored[:top_k]
 
@@ -62,6 +83,26 @@ class LongTermMemory:
             ts = item.get("timestamp", "")[:10]
             parts.append(f"- [{ts}] {item['summary'][:200]}")
         return "\n".join(parts)
+
+    def get_stats(self) -> dict:
+        self.load()
+        return {
+            "total_summaries": len(self.summaries),
+            "unique_topics": len(set(
+                t for s in self.summaries for t in s.get("topics", [])
+            )),
+            "oldest": self.summaries[0]["timestamp"] if self.summaries else "",
+            "newest": self.summaries[-1]["timestamp"] if self.summaries else "",
+        }
+
+    def delete_summary(self, conversation_id: str) -> bool:
+        self.load()
+        original_len = len(self.summaries)
+        self.summaries = [s for s in self.summaries if s.get("conversation_id") != conversation_id]
+        if len(self.summaries) < original_len:
+            self._save()
+            return True
+        return False
 
     def _save(self):
         try:

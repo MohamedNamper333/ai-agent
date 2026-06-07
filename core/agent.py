@@ -8,15 +8,14 @@ from enum import Enum
 
 import config
 
-from core.model import LLM
+from core.llm import LLMRouter
+from core.telemetry import Telemetry
+from core.reasoning import CoTEngine, ReasoningChain
 from core.memory import ConversationMemory
 from core.tools import ToolRegistry, Tool
 from core.context import ContextManager
 from core.cache import get_cache_manager, make_cache_key
 from rag.retriever import Retriever
-from core.llm import LLMRouter, ReasoningLevel
-from core.telemetry import Telemetry, default_telemetry
-from core.reasoning import CoTEngine, ReasoningChain
 
 
 class TaskStatus(Enum):
@@ -75,21 +74,19 @@ class Agent:
 
     def __init__(
         self,
-        model: LLM | None = None,
+        model: LLMRouter | None = None,
         memory: ConversationMemory | None = None,
         tools: ToolRegistry | None = None,
         context: ContextManager | None = None,
-        llm_router: LLMRouter | None = None,
         telemetry: Telemetry | None = None,
         cot_engine: CoTEngine | None = None,
     ):
-        self.model = model or LLM()
+        self.model = model or LLMRouter()
         self.memory = memory or ConversationMemory()
         self.tools = tools or ToolRegistry(agent=self)
         self.context = context or ContextManager()
-        self.llm_router = llm_router or LLMRouter()
-        self.telemetry = telemetry if telemetry is not None else default_telemetry()
-        self.cot = cot_engine or CoTEngine(self.llm_router)
+        self.telemetry = telemetry or Telemetry()
+        self.cot = cot_engine or CoTEngine(self.model)
         self.plugins = None
         self._execution_history: list[ExecutionPlan] = []
         self._cache = get_cache_manager().get_cache("agent_responses", max_size=500, ttl=config.CACHE_TTL)
@@ -100,34 +97,21 @@ class Agent:
         self._start_scheduler()
         self._init_rag()
 
-    def _current_model_name(self) -> str:
-        """Return the active LLM model name for telemetry tagging."""
-        return getattr(self.model, "_ollama_model", None) or "primary"
+    def think(self, query: str, level: str = "moderate") -> ReasoningChain:
+        """Delegate chain-of-thought reasoning to the CoT engine.
 
-    def _coerce_model_output(self, value) -> str:
-        """Defensively materialize model output to a string.
+        Args:
+            query: The user query or task to reason about.
+            level: One of 'simple', 'moderate', 'deep'.
 
-        ``self.model.generate()`` may legitimately return any of:
-          * ``str`` (legacy happy path)
-          * generator / iterator (legacy streaming + error paths where
-            ``LLM`` yields chunks, e.g. ``core.model`` line 214)
-          * ``LLMResponse`` (typed provider wrapper with ``.text``)
-          * ``None`` (upstream timeout / error swallowed)
-
-        Downstream code (JSON parsing, regex, logging) requires ``str``.
-        This helper shields call sites from that variance.
+        Returns:
+            ReasoningChain with parsed steps and final answer.
         """
-        if value is None:
-            return ""
-        if isinstance(value, str):
-            return value
-        text_attr = getattr(value, "text", None)
-        if isinstance(text_attr, str):
-            return text_attr
-        try:
-            return "".join(str(chunk) for chunk in value)
-        except TypeError:
-            return str(value)
+        with self.telemetry.track("think", level=level, query_len=len(query)) as evt:
+            chain = self.cot.think(query, level=level)
+            evt.data["steps"] = len(chain.steps)
+            evt.data["avg_confidence"] = chain.avg_confidence
+            return chain
 
     def _load_plugins(self):
         try:
@@ -186,30 +170,10 @@ class Agent:
         print(f"[Scheduler] Done: {name}")
         return result
 
-    def _classify_level(self, query: str) -> str:
-        """Classify a query into simple/moderate/deep reasoning level."""
-        try:
-            from core.llm import ReasoningLevel
-            level = self.llm_router.classify_level(query)
-            if isinstance(level, ReasoningLevel):
-                return level.value
-            return str(level)
-        except Exception:
-            return "moderate"
-
     def start_new_conversation(self, conversation_id: str = "") -> str:
         return self.memory.new_conversation(conversation_id)
 
     def chat(self, user_input: str, stream: bool = False):
-        # Top-level "chat" telemetry wraps the entire conversation turn so that
-        # every invocation (fast/slow/stream/cached/error) emits exactly one
-        # ``name="chat"`` event for observability dashboards. The inner
-        # ``llm.generate`` events are nested only when the fast path is taken
-        # and add fine-grained LLM-call timing on top of this outer envelope.
-        with self.telemetry.track("chat", stream=stream, model=self._current_model_name()):
-            return self._chat_impl(user_input, stream=stream)
-
-    def _chat_impl(self, user_input: str, stream: bool = False):
         self.memory.add_message("user", user_input)
 
         # RAG: retrieve knowledge
@@ -251,9 +215,7 @@ class Agent:
         if not stream:
             if use_fast:
                 prompt = self._build_system_prompt(user_input, tool_desc, history)
-                _model = self._current_model_name()
-                with self.telemetry.track("llm.generate", level="simple", stream=False, model=_model):
-                    response = self.model.generate(prompt)
+                response = self.model.generate(prompt)
             else:
                 response = self._execute_with_plan(user_input, tool_desc, history)
 
@@ -266,9 +228,7 @@ class Agent:
         else:
             if use_fast:
                 prompt = self._build_system_prompt(user_input, tool_desc, history)
-                _model = self._current_model_name()
-                with self.telemetry.track("llm.generate", level="simple", stream=True, model=_model):
-                    return self.model.generate(prompt, stream=True)
+                return self.model.generate(prompt, stream=True)
             return self._stream_agent_loop(user_input, tool_desc, history)
 
     async def achat(self, user_input: str, stream: bool = False):
@@ -299,19 +259,6 @@ class Agent:
                     ltm.add_summary(self.memory.current_id, summary, [topic])
         except Exception:
             pass
-
-    def think(self, question: str, context: str = "", level: str = "deep") -> ReasoningChain:
-        """Run a chain-of-thought reasoning pass for a question.
-
-        Args:
-            question: The question to reason about.
-            context: Optional supporting context.
-            level: "simple" | "moderate" | "deep" (default "deep").
-
-        Returns:
-            ReasoningChain with steps, answer, and confidence.
-        """
-        return self.cot.think(question=question, context=context, level=level)
 
     def _get_available_tools(self) -> list[dict]:
         tools_info = []
@@ -491,7 +438,7 @@ class Agent:
         plan = self._create_plan(user_input, tool_desc, history)
         if not plan.steps:
             prompt = self._build_system_prompt(user_input, tool_desc, history)
-            return self._coerce_model_output(self.model.generate(prompt))
+            return self.model.generate(prompt)
 
         for step in plan.steps:
             step.status = TaskStatus.IN_PROGRESS
@@ -533,9 +480,7 @@ class Agent:
             f"<|user|>\n{user_input}\n<|assistant|>\n"
         )
 
-        response = self._coerce_model_output(
-            self.model.generate(plan_prompt, max_tokens=1000)
-        )
+        response = self.model.generate(plan_prompt, max_tokens=1000)
 
         plan = ExecutionPlan(goal=user_input)
 
@@ -656,11 +601,3 @@ class Agent:
                 "steps": len(plan.steps),
             })
         return history
-
-    def telemetry_report(self) -> dict:
-        """Return aggregated telemetry stats (counts, latencies, errors)."""
-        return self.telemetry.report()
-
-    def telemetry_recent(self, limit: int = 20) -> list[dict]:
-        """Return the most recent telemetry events."""
-        return self.telemetry.recent(limit=limit)

@@ -637,3 +637,89 @@ class TestSwipeGesture:
             "web/style.css has touch-action but no `manipulation` value — "
             "double-tap zoom will not be suppressed on mobile."
         )
+
+
+# ===========================================================================
+# CORS — Round 4
+# ===========================================================================
+
+class TestCORS:
+    """Tests for the CORS configuration resolver and installed middleware.
+
+    The CORS policy lives in ``web._resolve_cors_config()``, which reads
+    ``config.CORS_ORIGINS`` and ``config.WEB_PORT`` at call time. The
+    middleware itself is installed once at import time, so the helper is
+    tested directly via ``patch.object`` on the config module. One
+    integration test verifies the actually-installed middleware handles a
+    CORS preflight using the default origin.
+    """
+
+    @staticmethod
+    def _resolve():
+        from web import _resolve_cors_config
+        return _resolve_cors_config()
+
+    def test_explicit_list_enables_credentials(self):
+        with patch.object(__import__("config"), "CORS_ORIGINS",
+                          "http://example.com, http://other.com"):
+            origins, creds = self._resolve()
+        assert origins == ["http://example.com", "http://other.com"]
+        assert creds is True
+
+    def test_wildcard_disables_credentials(self):
+        with patch.object(__import__("config"), "CORS_ORIGINS", "*"):
+            origins, creds = self._resolve()
+        assert origins == ["*"]
+        assert creds is False
+
+    def test_empty_string_falls_back_to_localhost(self):
+        with patch.object(__import__("config"), "CORS_ORIGINS", ""), \
+             patch.object(__import__("config"), "WEB_PORT", 8080):
+            origins, creds = self._resolve()
+        assert origins == ["http://localhost:8080"]
+        assert creds is True
+
+    def test_whitespace_only_falls_back_to_localhost(self):
+        with patch.object(__import__("config"), "CORS_ORIGINS", "   "), \
+             patch.object(__import__("config"), "WEB_PORT", 9000):
+            origins, creds = self._resolve()
+        assert origins == ["http://localhost:9000"]
+        assert creds is True
+
+    def test_none_value_falls_back_to_localhost(self):
+        with patch.object(__import__("config"), "CORS_ORIGINS", None), \
+             patch.object(__import__("config"), "WEB_PORT", 8080):
+            origins, creds = self._resolve()
+        assert origins == ["http://localhost:8080"]
+        assert creds is True
+
+    def test_comma_only_falls_back_to_localhost(self):
+        with patch.object(__import__("config"), "CORS_ORIGINS", ",,,"), \
+             patch.object(__import__("config"), "WEB_PORT", 8080):
+            origins, creds = self._resolve()
+        assert origins == ["http://localhost:8080"]
+        assert creds is True
+
+    def test_single_origin_no_trailing_whitespace(self):
+        with patch.object(__import__("config"), "CORS_ORIGINS",
+                          "  https://app.example.com  "):
+            origins, creds = self._resolve()
+        assert origins == ["https://app.example.com"]
+        assert creds is True
+
+    def test_middleware_preflight_with_default_origin(self):
+        client = _make_client()
+        agent = _base_agent_mock()
+        with _patch_agent(agent):
+            resp = client.options(
+                "/chat",
+                headers={
+                    "Origin": "http://localhost:8080",
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": "content-type",
+                },
+            )
+        assert resp.status_code == 200
+        assert resp.headers.get("access-control-allow-origin") == \
+            "http://localhost:8080"
+        assert resp.headers.get("access-control-allow-credentials") == "true"

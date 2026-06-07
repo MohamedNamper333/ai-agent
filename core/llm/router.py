@@ -1,302 +1,205 @@
-"""LLM router.
+"""LLMRouter — auto-routes requests to the best free provider.
 
-Picks the right provider/model for a given request. The router is the
-single object the agent talks to; it owns one :class:`OllamaProvider` and
-one :class:`OpenAICompatProvider` (configured for OpenCode Zen) and exposes
-``generate`` / ``agenerate`` that match the legacy ``core.model.LLM``
-interface.
+Strategy (free-tier only):
+  - SIMPLE   -> Ollama (local, no rate limit, low latency)
+  - MODERATE -> OpenCode Zen with deepseek-v4-flash-free
+  - DEEP     -> OpenCode Zen with big-pickle
 
-Routing signals
----------------
-The router inspects a request for several cheap signals:
+If the chosen provider is unavailable or fails, the router automatically
+falls back to the other provider.  model_override forces a specific
+provider:model pair.
 
-* ``metadata`` keys (``level`` / ``reasoning_level``) — explicit override.
-* Prompt keywords that flag complexity (e.g. "plan", "prove", "analyze").
-* Context size > :data:`LONG_CONTEXT_THRESHOLD` tokens.
-* Conversation history depth.
-* Tool complexity (number of registered tools).
-
-Each signal contributes a score. The cumulative score maps to a
-:data:`ReasoningLevel` which in turn picks a model.
-
-The router is fail-soft: when a provider raises :class:`LLMError`, it
-walks the fallback list. If everything fails the last error is re-raised.
+The router exposes the same surface as core.model.LLM.generate/stream/
+agenerate so it can be a drop-in replacement for `self.model` in
+core/agent.py.
 """
-
 from __future__ import annotations
 
-import re
-import time
-from typing import Iterator, Optional, Union
+import logging
+from typing import Any, Iterator, Optional, Union
 
-from core.llm.base import (
+from .base import (
+    AllProvidersFailed,
     BaseLLM,
     LLMError,
     LLMRequest,
     LLMResponse,
+    ProviderUnavailable,
     ReasoningLevel,
+    normalize_level,
 )
-from core.llm.config import LLMConfig
-from core.llm.ollama_provider import OllamaProvider
-from core.llm.openai_compat_provider import (
-    OpenAICompatProvider,
-    build_opencode_zen,
+from .config import LLMConfig, get_llm_config
+
+
+logger = logging.getLogger(__name__)
+
+
+# Heuristic signals for complexity classification.
+DEEP_KEYWORDS = (
+    "analyze", "analysis", "design", "architect", "architectural",
+    "compare", "evaluate", "implement", "refactor", "optimize",
+    "plan ", "design ", "investigate", "research", "review",
+    "comprehensive", "detailed", "in-depth", "thorough",
+    "explain why", "step by step", "trade-off", "tradeoff",
+    "build a", "create a system", "write a program",
 )
-
-
-# Free-model catalog. The router picks from this set; the OpenCode Zen
-# provider refuses unknown models.
-FREE_MODELS: tuple[str, ...] = (
-    "minimax-m3-free",
-    "big-pickle",
-    "deepseek-v4-flash-free",
-    "nemotron-3-ultra-free",
-    "mimo-v2.5-free",
+MODERATE_KEYWORDS = (
+    "summarize", "summary", "list ", "describe", "explain", "what is",
+    "how does", "translate", "convert", "find ", "show me", "give me",
+    "create", "write", "generate", "draft", "rewrite",
 )
-
-
-# Routing tables — these are the public surface for "which model handles
-# which level". Update in lockstep with ``FREE_MODELS`` above.
-DEFAULT_MODEL_BY_LEVEL: dict[ReasoningLevel, str] = {
-    ReasoningLevel.SIMPLE: "qwen2.5:7b",
-    ReasoningLevel.MODERATE: "mimo-v2.5-free",
-    ReasoningLevel.DEEP: "deepseek-v4-flash-free",
-}
-
-
-# Keyword sets used to score prompt complexity. Kept small and obvious so
-# anyone can read the router and understand why a query is "deep".
-DEEP_KEYWORDS: frozenset[str] = frozenset(
-    {
-        "plan", "prove", "verify", "analyze", "design",
-        "architecture", "optimize", "refactor", "debug", "compare",
-        "evaluate", "synthesize", "reasoning", "theorem", "derive",
-        "complex", "in depth", "step by step",
-    }
-)
-MODERATE_KEYWORDS: frozenset[str] = frozenset(
-    {
-        "write", "generate", "create", "build", "implement",
-        "code", "function", "class", "explain", "summarize",
-        "translate", "convert", "edit", "fix",
-    }
-)
-
-
-LONG_CONTEXT_THRESHOLD = 8000  # characters; cheap proxy for token count
 
 
 class LLMRouter:
-    """Single entry-point for agent / web layer.
+    """Routes LLMRequest to the best free provider/model.
 
-    Construct once at process start, then call :meth:`generate` /
-    :meth:`agenerate` per request.
-
-    Parameters
-    ----------
-    config : LLMConfig | None
-        Static configuration. When None, defaults are used.
-    ollama : OllamaProvider | None
-        Pre-built provider. When None, one is built from ``config``.
-    opencode_zen : OpenAICompatProvider | None
-        Pre-built provider. When None, built only if
-        ``config.opencode_zen_api_key`` is set.
+    Drop-in replacement for the legacy LLM class — same `generate(...)`
+    and `stream(...)` signatures.
     """
 
-    def __init__(
-        self,
-        config: LLMConfig | None = None,
-        ollama: OllamaProvider | None = None,
-        opencode_zen: OpenAICompatProvider | None = None,
-    ) -> None:
-        self.config = config or LLMConfig()
-        self.ollama = ollama or OllamaProvider(
-            url=self.config.ollama_url,
-            model=self.config.ollama_model,
-        )
-        self.opencode_zen: Optional[OpenAICompatProvider] = opencode_zen
-        if self.opencode_zen is None and self.config.opencode_zen_api_key:
-            self.opencode_zen = build_opencode_zen(
-                api_key=self.config.opencode_zen_api_key,
-                base_url=self.config.opencode_zen_base_url,
-                default_model=self.config.opencode_zen_default_model,
+    def __init__(self, config: Optional[LLMConfig] = None):
+        self.config = config or get_llm_config()
+        self._ollama: Optional[BaseLLM] = None
+        self._zen: Optional[BaseLLM] = None
+        self._stats: dict[str, Any] = {
+            "total_requests": 0,
+            "by_level": {"simple": 0, "moderate": 0, "deep": 0},
+            "by_provider": {"ollama": 0, "opencode_zen": 0},
+            "by_model": {},
+            "fallbacks": 0,
+            "errors": 0,
+        }
+
+    @property
+    def ollama(self) -> BaseLLM:
+        if self._ollama is None and self.config.ollama_enabled:
+            from .ollama_provider import OllamaProvider
+
+            self._ollama = OllamaProvider(
+                model=self.config.simple_model,
+                url=self.config.ollama_url,
             )
+        if self._ollama is None:
+            raise ProviderUnavailable(
+                "Ollama is disabled in config", provider="ollama"
+            )
+        return self._ollama
 
-        # Build the canonical routing table at construction time so it
-        # reflects the providers that are actually configured.
-        self._model_by_level: dict[ReasoningLevel, str] = dict(
-            DEFAULT_MODEL_BY_LEVEL
-        )
-        # If OpenCode Zen isn't configured, fall back DEEP → Ollama to
-        # avoid an instant LLMError.
-        if not self._zen_available():
-            self._model_by_level[ReasoningLevel.DEEP] = self.config.ollama_model
-            self._model_by_level[ReasoningLevel.MODERATE] = self.config.ollama_model
+    @property
+    def zen(self) -> BaseLLM:
+        if self._zen is None and self.config.opencode_zen_enabled:
+            from .opencode_zen_provider import OpenCodeZenProvider
 
-    # -- provider availability ------------------------------------------------
+            if not self.config.opencode_zen_key:
+                raise ProviderUnavailable(
+                    "OPENCODE_ZEN_KEY not configured", provider="opencode_zen"
+                )
+            self._zen = OpenCodeZenProvider(
+                model=self.config.deep_model,
+                api_key=self.config.opencode_zen_key,
+                base_url=self.config.opencode_zen_url,
+            )
+        if self._zen is None:
+            raise ProviderUnavailable(
+                "OpenCode Zen is disabled in config", provider="opencode_zen"
+            )
+        return self._zen
 
-    def _zen_available(self) -> bool:
-        return self.opencode_zen is not None and self.opencode_zen.is_available()
+    def classify(self, prompt: str) -> ReasoningLevel:
+        """Heuristic complexity classification.
 
-    def _ollama_available(self) -> bool:
-        try:
-            return bool(self.ollama.is_available())
-        except Exception:
-            return False
-
-    def available_providers(self) -> list[str]:
-        names: list[str] = []
-        if self._ollama_available():
-            names.append("ollama")
-        if self._zen_available():
-            names.append("opencode_zen")
-        return names
-
-    # -- routing logic --------------------------------------------------------
-
-    def _score_prompt(self, prompt: str) -> int:
-        text = (prompt or "").lower()
-        if not text:
-            return 0
-        score = 0
-        for kw in DEEP_KEYWORDS:
-            if re.search(rf"\b{re.escape(kw)}\b", text):
-                score += 2
-        for kw in MODERATE_KEYWORDS:
-            if re.search(rf"\b{re.escape(kw)}\b", text):
-                score += 1
-        # Long context pushes things deeper even without keywords.
-        if len(text) > LONG_CONTEXT_THRESHOLD:
-            score += 3
-        return score
-
-    def _classify(self, request: LLMRequest) -> ReasoningLevel:
-        explicit = request.metadata.get("level") or request.metadata.get(
-            "reasoning_level"
-        )
-        if explicit is not None:
-            return ReasoningLevel.from_str(str(explicit))
-
+        Returns DEEP for long, design-style requests; MODERATE for
+        multi-step tasks that benefit from stronger reasoning; SIMPLE
+        otherwise.
+        """
         if not self.config.auto_route:
-            return ReasoningLevel.from_str(self.config.default_level)
+            return normalize_level(self.config.default_level)
 
-        score = self._score_prompt(request.prompt)
-        # Conversation history bumps complexity by 1 if > 4 turns.
-        history_depth = int(request.metadata.get("history_depth", 0) or 0)
-        if history_depth > 4:
-            score += 1
-        tool_count = int(request.metadata.get("tool_count", 0) or 0)
-        if tool_count >= 5:
-            score += 1
+        text = (prompt or "").lower().strip()
+        words = text.split()
+        word_count = len(words)
 
-        return self._score_to_level(score)
-
-    def _score_to_level(self, score: int) -> ReasoningLevel:
-        if score >= 4:
+        if word_count > 50:
             return ReasoningLevel.DEEP
-        if score >= 1:
+        if any(kw in text for kw in DEEP_KEYWORDS):
+            return ReasoningLevel.DEEP
+        if text.count("?") >= 2 or text.count("\n") >= 4:
+            return ReasoningLevel.DEEP
+
+        if word_count > 15:
             return ReasoningLevel.MODERATE
+        if any(kw in text for kw in MODERATE_KEYWORDS):
+            return ReasoningLevel.MODERATE
+
         return ReasoningLevel.SIMPLE
 
-    def classify_level(self, prompt: str) -> ReasoningLevel:
-        """Public classifier: map a free-form prompt to a :class:`ReasoningLevel`.
-
-        Does NOT touch any provider — it only inspects keywords, prompt
-        length, and the configured ``default_level``. Useful for callers
-        (UI, telemetry) that want to preview the routing decision before
-        issuing a request.
-        """
-        if not self.config.auto_route:
-            return ReasoningLevel.from_str(self.config.default_level)
-        score = self._score_prompt(prompt or "")
-        return self._score_to_level(score)
-
-    def select_model(self, request: LLMRequest) -> str:
-        """Pick the best model for the request.
-
-        Honors an explicit ``request.model`` first, otherwise the level
-        table.
-        """
-        if request.model:
-            return request.model
-        level = self._classify(request)
-        return self._model_by_level[level]
-
-    # -- public generate ------------------------------------------------------
-
-    def _resolve_provider(self, model: str) -> BaseLLM:
-        """Pick the provider that owns ``model``.
-
-        Heuristic: anything in the OpenCode Zen free catalog goes to Zen;
-        anything else (Ollama tags like ``qwen2.5:7b``) goes to Ollama.
-        """
-        if model in FREE_MODELS and self._zen_available():
-            return self.opencode_zen  # type: ignore[return-value]
-        return self.ollama
-
-    def _build_request(self, request: LLMRequest) -> LLMRequest:
-        """Mutate a copy of ``request`` so its ``model`` matches what the
-        router picked. The caller is not affected."""
-        if request.model:
-            return request
-        chosen = self.select_model(request)
+    def _build_request(
+        self,
+        prompt: str,
+        system: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        stop: Optional[list[str]] = None,
+        level: Optional[Union[ReasoningLevel, str]] = None,
+        model_override: Optional[str] = None,
+    ) -> LLMRequest:
+        if level is None:
+            lvl = self.classify(prompt)
+        else:
+            lvl = normalize_level(level)
         return LLMRequest(
-            prompt=request.prompt,
-            max_tokens=request.max_tokens,
-            temperature=request.temperature,
-            stop=list(request.stop) if request.stop else None,
-            stream=request.stream,
-            model=chosen,
-            metadata=dict(request.metadata),
+            prompt=prompt,
+            system=system,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            stop=stop,
+            level=lvl,
+            model_override=model_override,
         )
 
-    def _call_with_fallback(
-        self, request: LLMRequest
-    ) -> Union[str, Iterator[str]]:
-        effective = self._build_request(request)
-        chosen_model = effective.model or self.select_model(request)
+    def _pick_provider(self, request: LLMRequest) -> BaseLLM:
+        if request.model_override:
+            m = request.model_override.lower()
+            zen_names = {
+                "minimax-m3-free", "big-pickle", "deepseek-v4-flash-free",
+                "nemotron-3-ultra-free", "miimo-v2.5-free",
+            }
+            if m.startswith("opencode/") or m in zen_names:
+                return self.zen
+            if m.startswith("ollama:"):
+                return self.ollama
+            if m == self.config.ollama_model.lower():
+                return self.ollama
 
-        primary = self._resolve_provider(chosen_model)
-        secondary: Optional[BaseLLM] = None
-        if primary is self.ollama and self._zen_available():
-            secondary = self.opencode_zen
-        elif primary is self.opencode_zen and self._ollama_available():
-            secondary = self.ollama
-
-        last_exc: Optional[LLMError] = None
-        for provider in (primary, secondary):
-            if provider is None:
-                continue
+        if request.level == ReasoningLevel.SIMPLE:
             try:
-                return provider.generate(effective)
-            except LLMError as exc:
-                last_exc = exc
-                # Retryable → try fallback. Non-retryable → surface now.
-                if not exc.retryable:
-                    raise
-                continue
+                return self.ollama
+            except ProviderUnavailable:
+                return self.zen
+        return self.zen
 
-        raise last_exc or LLMError(
-            "No provider available",
-            provider="router",
-            retryable=False,
-        )
+    def _fallback_provider(self, failed: BaseLLM) -> Optional[BaseLLM]:
+        if failed.provider_name == "ollama":
+            try:
+                return self.zen
+            except ProviderUnavailable:
+                return None
+        if failed.provider_name == "opencode_zen":
+            try:
+                return self.ollama
+            except ProviderUnavailable:
+                return None
+        return None
 
-    def generate(self, request: LLMRequest) -> Union[str, Iterator[str]]:
-        return self._call_with_fallback(request)
+    def _set_provider_model(self, provider: BaseLLM, level: ReasoningLevel) -> None:
+        if provider.provider_name == "ollama":
+            provider.model = self.config.simple_model
+        elif level == ReasoningLevel.MODERATE:
+            provider.model = self.config.moderate_model
+        elif level == ReasoningLevel.DEEP:
+            provider.model = self.config.deep_model
 
-    async def agenerate(self, request: LLMRequest) -> Union[str, Iterator[str]]:
-        effective = self._build_request(request)
-        chosen_model = effective.model or self.select_model(request)
-        primary = self._resolve_provider(chosen_model)
-        if hasattr(primary, "agenerate"):
-            return await primary.agenerate(effective)
-        # Fallback to the base async default.
-        return await primary.agenerate(effective)
-
-    # -- back-compat with core.model.LLM --------------------------------------
-
-    def generate_text(
+    def generate(
         self,
         prompt: str,
         max_tokens: Optional[int] = None,
@@ -304,39 +207,143 @@ class LLMRouter:
         stop: Optional[list[str]] = None,
         stream: bool = False,
         retries: int = 0,
-    ) -> str:
-        """Legacy-friendly shim used by ``core/agent.py``.
-
-        Returns a plain string; for streaming use ``generate`` directly.
-        The ``retries`` arg is accepted for API symmetry but the router's
-        providers already implement internal retries, so it's a no-op.
-        """
-        result = self.generate(
-            LLMRequest(
-                prompt=prompt,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                stop=stop,
-                stream=False,
-            )
+        system: Optional[str] = None,
+        level: Optional[Union[ReasoningLevel, str]] = None,
+        model_override: Optional[str] = None,
+    ) -> Union[str, Iterator[str]]:
+        """Drop-in shim for core.model.LLM.generate()."""
+        request = self._build_request(
+            prompt=prompt,
+            system=system,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            stop=stop,
+            level=level,
+            model_override=model_override,
         )
-        if isinstance(result, LLMResponse):
-            return result.text
-        if isinstance(result, str):
-            return result
-        # Provider returned an iterator even though we asked for sync;
-        # collapse to text.
-        chunks = []
-        for chunk in result:
-            chunks.append(chunk)
-        return "".join(chunks)
+        if stream:
+            return self._stream_with_fallback(request)
+        response = self.generate_full(request)
+        return response.text
 
+    def _stream_with_fallback(self, request: LLMRequest) -> Iterator[str]:
+        provider = self._pick_provider(request)
+        if request.model_override:
+            provider.model = request.model_override
+        else:
+            self._set_provider_model(provider, request.level)
+        try:
+            yield from provider.stream(request)
+            return
+        except LLMError as primary_err:
+            self._stats["errors"] += 1
+            logger.warning(
+                "Provider %s stream failed: %s; trying fallback",
+                provider.provider_name, primary_err,
+            )
+            fb = self._fallback_provider(provider)
+            if fb is None:
+                raise AllProvidersFailed(
+                    f"All providers failed. Primary: {primary_err}",
+                    provider=provider.provider_name,
+                    level=request.level,
+                ) from primary_err
+            self._stats["fallbacks"] += 1
+            self._set_provider_model(fb, request.level)
+            try:
+                yield from fb.stream(request)
+            except LLMError as fb_err:
+                raise AllProvidersFailed(
+                    f"All providers failed. Primary: {primary_err}; Fallback: {fb_err}",
+                    provider=fb.provider_name,
+                    level=request.level,
+                ) from fb_err
 
-__all__ = [
-    "LLMRouter",
-    "FREE_MODELS",
-    "DEFAULT_MODEL_BY_LEVEL",
-    "DEEP_KEYWORDS",
-    "MODERATE_KEYWORDS",
-    "LONG_CONTEXT_THRESHOLD",
-]
+    def stream(self, prompt: str, **kwargs: Any) -> Iterator[str]:
+        """Drop-in shim for core.model.LLM.stream()."""
+        request = self._build_request(prompt, **kwargs)
+        return self._stream_with_fallback(request)
+
+    async def agenerate(self, prompt: str, **kwargs: Any) -> str:
+        """Async wrapper — returns just the response text."""
+        import asyncio
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, lambda: self.generate(prompt, **kwargs)
+        )
+
+    def generate_full(self, request: LLMRequest) -> LLMResponse:
+        """Generate a full LLMResponse with metadata. With fallback."""
+        self._stats["total_requests"] += 1
+        self._stats["by_level"][request.level.value] += 1
+
+        primary = self._pick_provider(request)
+        if request.model_override:
+            primary.model = request.model_override
+        else:
+            self._set_provider_model(primary, request.level)
+
+        try:
+            response = primary.generate(request)
+            self._stats["by_provider"][primary.provider_name] += 1
+            self._stats["by_model"][response.model] = (
+                self._stats["by_model"].get(response.model, 0) + 1
+            )
+            return response
+        except LLMError as primary_err:
+            self._stats["errors"] += 1
+            logger.warning(
+                "Provider %s failed: %s; trying fallback",
+                primary.provider_name, primary_err,
+            )
+            fb = self._fallback_provider(primary)
+            if fb is None:
+                raise AllProvidersFailed(
+                    f"All providers failed. Primary: {primary_err}",
+                    provider=primary.provider_name,
+                    level=request.level,
+                ) from primary_err
+            self._stats["fallbacks"] += 1
+            self._set_provider_model(fb, request.level)
+            try:
+                response = fb.generate(request)
+                self._stats["by_provider"][fb.provider_name] += 1
+                self._stats["by_model"][response.model] = (
+                    self._stats["by_model"].get(response.model, 0) + 1
+                )
+                return response
+            except LLMError as fb_err:
+                raise AllProvidersFailed(
+                    f"All providers failed. Primary: {primary_err}; Fallback: {fb_err}",
+                    provider=fb.provider_name,
+                    level=request.level,
+                ) from fb_err
+
+    def get_stats(self) -> dict[str, Any]:
+        return {
+            **self._stats,
+            "config": {
+                "ollama_url": self.config.ollama_url,
+                "ollama_model": self.config.ollama_model,
+                "ollama_enabled": self.config.ollama_enabled,
+                "zen_url": self.config.opencode_zen_url,
+                "zen_configured": bool(self.config.opencode_zen_key),
+                "zen_enabled": self.config.opencode_zen_enabled,
+                "simple_model": self.config.simple_model,
+                "moderate_model": self.config.moderate_model,
+                "deep_model": self.config.deep_model,
+                "auto_route": self.config.auto_route,
+                "default_level": self.config.default_level,
+            },
+        }
+
+    def reset_stats(self) -> None:
+        self._stats = {
+            "total_requests": 0,
+            "by_level": {"simple": 0, "moderate": 0, "deep": 0},
+            "by_provider": {"ollama": 0, "opencode_zen": 0},
+            "by_model": {},
+            "fallbacks": 0,
+            "errors": 0,
+        }

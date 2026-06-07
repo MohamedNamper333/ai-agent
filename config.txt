@@ -1,19 +1,24 @@
 # AI Agent Configuration
-# Backend: "ollama" (recommended) or "llama" (direct GGUF)
-BACKEND = ollama
-OLLAMA_MODEL = qwen2.5:7b
-OLLAMA_BASE = http://127.0.0.1:11434
-
-# For direct GGUF usage (if BACKEND = llama):
-MODEL_PATH = models/qwen2.5-7b-instruct-q4_k_m.gguf
+# Backend: "gpt4all" (Python package) or "llama" (direct GGUF)
+BACKEND = gpt4all
+GPT4ALL_MODEL = Phi-3-mini-4k-instruct.Q4_0.gguf
+GPT4ALL_MODEL_DIR = C:\Users\coman\.cache\gpt4all
 N_GPU_LAYERS = -1
 N_THREADS = 6
 
 # Common settings
-N_CTX = 8192
+N_CTX = 32768
 TEMP = 0.7
-MAX_TOKENS = 2048
-SYSTEM_PROMPT = You are a helpful, capable AI assistant.
+MAX_TOKENS = 8192
+SYSTEM_PROMPT = You are a helpful, capable AI assistant. You speak Arabic fluently. When the user writes in Arabic, you MUST respond in Arabic. When the user writes in English, respond in English. You fully understand both languages and switch between them naturally.\n\nأنت مساعد ذكي تتقن اللغة العربية بطلاقة. عندما يكتب المستخدم بالعربية، يجب عليك الرد بالعربية. عندما يكتب بالإنجليزية، رد بالإنجليزية. أنت تفهم اللغتين تماماً وتتنقل بينهما بسلاسة.
 WEB_HOST = 127.0.0.1
 WEB_PORT = 8080
 DB_PATH = memory_store.json
+
+# Performance & intelligence
+FAST_MODE = auto
+CACHE_TTL = 300
+RAG_ENABLED = true
+
+# Tools: empty = all enabled, comma-separated = only these enabled
+TOOLS_ENABLED =

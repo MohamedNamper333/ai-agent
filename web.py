@@ -53,13 +53,64 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="AI Agent", lifespan=lifespan)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+def _resolve_cors_config():
+    raw = (config.CORS_ORIGINS or "").strip()
+    if not raw:
+        return [f"http://localhost:{config.WEB_PORT}"], True
+    if raw == "*":
+        return ["*"], False
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
+    if not origins:
+        return [f"http://localhost:{config.WEB_PORT}"], True
+    return origins, True
+
+
+_cors_origins, _cors_allow_credentials = _resolve_cors_config()
+
+
+class _DynamicCORSMiddleware:
+    """CORS middleware that re-reads config per request with a small cache.
+
+    The default Starlette ``CORSMiddleware`` freezes ``allow_origins`` and
+    ``allow_credentials`` at install time (when ``app.add_middleware`` is
+    called), so any runtime change to ``config.CORS_ORIGINS`` (by tests
+    patching config, or by a future config-reload feature) would not be
+    picked up by the running server. This wrapper delegates each HTTP
+    request to a ``CORSMiddleware`` built from the current config, ensuring
+    the active configuration is always honoured.
+
+    To avoid allocating a fresh ``CORSMiddleware`` on every request, the
+    last-built instance is cached and reused as long as the configuration
+    key ``(tuple(origins), credentials)`` is unchanged. When the key
+    changes (e.g. test patches ``config.CORS_ORIGINS``) the cache is
+    invalidated and the next request rebuilds the middleware.
+    """
+
+    def __init__(self, app):
+        self.app = app
+        self._cache_key = None
+        self._cached_cors = None
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        origins, credentials = _resolve_cors_config()
+        key = (tuple(origins), credentials)
+        if key != self._cache_key:
+            self._cached_cors = CORSMiddleware(
+                self.app,
+                allow_origins=origins,
+                allow_credentials=credentials,
+                allow_methods=["*"],
+                allow_headers=["*"],
+            )
+            self._cache_key = key
+        await self._cached_cors(scope, receive, send)
+
+
+app.add_middleware(_DynamicCORSMiddleware)
 
 agent = Agent()
 retriever: Optional[Retriever] = None

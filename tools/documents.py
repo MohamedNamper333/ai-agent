@@ -1,4 +1,4 @@
-"""PDF, DOCX, and Image analysis tools"""
+"""PDF, DOCX, Excel, and Image analysis tools"""
 
 import base64
 import io
@@ -118,3 +118,54 @@ class DocumentTools:
             return "Error: Install Pillow + pytesseract"
         except Exception as e:
             return f"Error in OCR: {e}"
+
+    @staticmethod
+    def read_excel(file_path: str, sheet: str = "") -> str:
+        p = Path(file_path)
+        if not p.exists():
+            return f"Error: File not found: {file_path}"
+
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(str(p), read_only=True, data_only=True)
+
+            sheet_names = wb.sheetnames
+            target_sheet = sheet if sheet and sheet in sheet_names else sheet_names[0]
+            ws = wb[target_sheet]
+
+            rows = list(ws.iter_rows(values_only=True))
+            if not rows:
+                return f"Excel file is empty: {file_path}"
+
+            result = [
+                f"Excel: {p.name}",
+                f"Sheet: {target_sheet}",
+                f"Rows: {len(rows)-1}",
+                "",
+                "First 5 rows:",
+            ]
+            for row in rows[:5]:
+                result.append(f"  {list(row)}")
+
+            wb.close()
+            return "\n".join(result)
+
+        except ImportError:
+            return "Error: Install openpyxl (pip install openpyxl)"
+        except Exception as e:
+            return f"Error reading Excel: {e}"
+
+    @staticmethod
+    def html_to_text(html_content: str) -> str:
+        try:
+            import re
+            text = re.sub(r'<script[^>]*>.*?</script>', '', html_content, flags=re.DOTALL | re.IGNORECASE)
+            text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
+            text = re.sub(r'<[^>]+>', ' ', text)
+            text = re.sub(r'\s+', ' ', text).strip()
+
+            if len(text) > 10000:
+                text = text[:10000] + "\n... (truncated)"
+            return text
+        except Exception as e:
+            return f"Error: {e}"

@@ -72,3 +72,60 @@ class GitOps:
             root = GitOps._run_git(["rev-parse", "--show-toplevel"], str(p))
             return f"Git repository: {root}"
         return "Not a git repository"
+
+    @staticmethod
+    def git_add(files: str = ".", path: str = "") -> str:
+        file_list = [f.strip() for f in files.split(",") if f.strip()]
+        if not file_list:
+            file_list = ["."]
+
+        results = []
+        for f in file_list:
+            result = GitOps._run_git(["add", f], path)
+            if "error" in result.lower():
+                results.append(f"Failed to add '{f}': {result}")
+            else:
+                results.append(f"Added: {f}")
+
+        return "\n".join(results)
+
+    @staticmethod
+    def git_commit(message: str, path: str = "") -> str:
+        if not message:
+            return "Error: Commit message is required"
+
+        result = GitOps._run_git(["commit", "-m", message], path)
+        return result
+
+    @staticmethod
+    def git_blame(file_path: str, path: str = "") -> str:
+        if not file_path:
+            return "Error: File path is required"
+
+        result = GitOps._run_git(["blame", "--line-porcelain", file_path], path)
+
+        if "error" in result.lower():
+            return result
+
+        blame_data = {}
+        for line in result.splitlines():
+            if line.startswith("author "):
+                author = line[7:]
+            elif line.startswith("summary "):
+                summary = line[8:]
+            elif line.startswith("\t"):
+                content = line[1:]
+                if author not in blame_data:
+                    blame_data[author] = []
+                blame_data[author].append(content)
+
+        output = [f"Git Blame: {file_path}", ""]
+        for author, lines in blame_data.items():
+            output.append(f"{author} ({len(lines)} lines):")
+            for line in lines[:5]:
+                output.append(f"  {line[:100]}")
+            if len(lines) > 5:
+                output.append(f"  ... and {len(lines) - 5} more lines")
+            output.append("")
+
+        return "\n".join(output)

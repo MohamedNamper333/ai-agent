@@ -1,112 +1,138 @@
-"""LLM configuration loaded from environment variables.
+"""LLM configuration loaded from environment via config.env_loader.
 
-The router and providers all read from :class:`LLMConfig`. We deliberately
-keep this class small and stdlib-only so it can be instantiated in tests
-without any I/O.
-
-Notes
------
-We read directly from :data:`os.environ` rather than going through
-``config.env_loader``. The reason is the project root contains a single
-``config.py`` module that shadows the ``config/`` package, which would
-make ``from config import env_loader`` raise ``ImportError`` during
-collection. LLM env vars are user-supplied at runtime, so we do not need
-``.env`` file fallback here.
-
-Environment variables
----------------------
-OLLAMA_URL                : Ollama base URL (default ``http://localhost:11434``)
-OLLAMA_MODEL              : Default Ollama model tag (default ``qwen2.5:7b``)
-OPENCODE_ZEN_API_KEY      : OpenCode Zen API key (no default — empty = disabled)
-OPENCODE_ZEN_BASE_URL     : API base (default ``https://opencode.ai/zen/v1``)
-OPENCODE_ZEN_DEFAULT_MODEL: Default model on OpenCode Zen
-                           (default ``deepseek-v4-flash-free``)
-LLM_DEFAULT_LEVEL         : ``simple`` / ``moderate`` / ``deep`` (default ``moderate``)
-LLM_AUTO_ROUTE            : ``true`` / ``false`` (default ``true``)
+Two providers are configured:
+  - Ollama (local, free, default for SIMPLE level)
+  - OpenCode Zen (cloud, free, default for MODERATE / DEEP levels)
 """
-
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
+try:
+    from config.env_loader import get_env
+except ImportError:
+    BASE_DIR_FALLBACK = Path(__file__).resolve().parent.parent.parent
 
-def _truthy(value: str | None) -> bool:
-    if not value:
-        return False
-    return value.strip().lower() in {"1", "true", "yes", "on", "y", "t"}
+    def get_env(key: str, default: Optional[str] = None) -> Optional[str]:
+        return os.environ.get(key, default)
 
 
-def _get(key: str, default: str) -> str:
-    """Read a string env var with a default. Never raises."""
-    value = os.environ.get(key, default)
-    if value is None:
-        value = default
-    return str(value)
+# Free models available on OpenCode Zen.
+# Users can override any of these via env vars (LLM_SIMPLE_MODEL etc.).
+OPENCODE_ZEN_FREE_MODELS = {
+    "minimax-m3-free": "opencode/minimax-m3-free",
+    "big-pickle": "opencode/big-pickle",
+    "deepseek-v4-flash-free": "opencode/deepseek-v4-flash-free",
+    "nemotron-3-ultra-free": "opencode/nemotron-3-ultra-free",
+    "miimo-v2.5-free": "opencode/miimo-v2.5-free",
+}
+
+
+def _ensure_zen_prefix(model: str) -> str:
+    """Ensure an OpenCode Zen model id carries the 'opencode/' prefix.
+
+    Bare short names (e.g. "deepseek-v4-flash-free") stored in
+    ``LLMConfig.moderate_model`` / ``deep_model`` are normalised to the
+    ``opencode/<model>`` form expected by the provider API. Values that
+    are already prefixed (e.g. user override ``opencode/big-pickle``)
+    are returned unchanged.
+    """
+    if model.startswith("opencode/"):
+        return model
+    return f"opencode/{model}"
 
 
 @dataclass
 class LLMConfig:
-    """Static configuration for the LLM provider layer.
+    """Configuration for LLM providers.
 
-    All fields have safe defaults so the framework runs even when no env
-    vars are set. Tests can construct this directly without touching the
-    environment.
+    All values loaded from env via get_env(). See .env.example for keys.
     """
 
+    # Ollama (local, free)
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:7b"
+    ollama_enabled: bool = True
 
-    opencode_zen_api_key: str = ""
-    opencode_zen_base_url: str = "https://opencode.ai/zen/v1"
-    opencode_zen_default_model: str = "deepseek-v4-flash-free"
+    # OpenCode Zen (cloud, free)
+    opencode_zen_url: str = "https://opencode.ai/zen/v1"
+    opencode_zen_key: str = ""
+    opencode_zen_enabled: bool = True
 
-    default_level: str = "moderate"
+    # Model routing per level
+    simple_model: str = "qwen2.5:7b"
+    moderate_model: str = "deepseek-v4-flash-free"
+    deep_model: str = "big-pickle"
+
+    # Behaviour
     auto_route: bool = True
+    default_level: str = "simple"
+    request_timeout: int = 120
+    max_retries: int = 2
 
-    # Free-model catalog exposed to users. The router uses an internal map
-    # for picking; this list is what gets surfaced in docs / help text.
-    available_models: list[str] = field(
-        default_factory=lambda: [
-            "minimax-m3-free",
-            "big-pickle",
-            "deepseek-v4-flash-free",
-            "nemotron-3-ultra-free",
-            "mimo-v2.5-free",
-        ]
+    def has_any_provider(self) -> bool:
+        """True if at least one provider is enabled + usable."""
+        if self.ollama_enabled:
+            return True
+        if self.opencode_zen_enabled and self.opencode_zen_key:
+            return True
+        return False
+
+    def resolve_for_level(self, level: str) -> tuple[str, str]:
+        """Return (provider_name, model_id) for a given level.
+
+        Provider name is one of: "ollama", "opencode_zen".
+        Zen model ids are normalised to the "opencode/<model>" form.
+        """
+        if level == "deep":
+            return ("opencode_zen", _ensure_zen_prefix(self.deep_model))
+        if level == "moderate":
+            return ("opencode_zen", _ensure_zen_prefix(self.moderate_model))
+        if self.ollama_enabled:
+            return ("ollama", self.simple_model)
+        if self.opencode_zen_enabled and self.opencode_zen_key:
+            return ("opencode_zen", _ensure_zen_prefix(self.moderate_model))
+        return ("ollama", self.simple_model)
+
+
+def get_llm_config() -> LLMConfig:
+    """Load LLM config from environment (os.environ > .env > defaults)."""
+    return LLMConfig(
+        ollama_url=get_env("OLLAMA_URL", "http://localhost:11434") or "http://localhost:11434",
+        ollama_model=get_env("OLLAMA_MODEL", "qwen2.5:7b") or "qwen2.5:7b",
+        ollama_enabled=(get_env("OLLAMA_ENABLED", "true") or "true").lower() in ("1", "true", "yes"),
+        opencode_zen_url=get_env("OPENCODE_ZEN_URL", "https://opencode.ai/zen/v1")
+        or "https://opencode.ai/zen/v1",
+        opencode_zen_key=get_env("OPENCODE_ZEN_KEY", "") or "",
+        opencode_zen_enabled=(get_env("OPENCODE_ZEN_ENABLED", "true") or "true").lower()
+        in ("1", "true", "yes"),
+        simple_model=get_env("LLM_SIMPLE_MODEL", "qwen2.5:7b") or "qwen2.5:7b",
+        moderate_model=get_env("LLM_MODERATE_MODEL", "deepseek-v4-flash-free")
+        or "deepseek-v4-flash-free",
+        deep_model=get_env("LLM_DEEP_MODEL", "big-pickle") or "big-pickle",
+        auto_route=(get_env("LLM_AUTO_ROUTE", "true") or "true").lower() in ("1", "true", "yes"),
+        default_level=get_env("LLM_DEFAULT_LEVEL", "simple") or "simple",
+        request_timeout=int(get_env("LLM_REQUEST_TIMEOUT", "120") or 120),
+        max_retries=int(get_env("LLM_MAX_RETRIES", "2") or 2),
     )
 
-    @classmethod
-    def from_env(cls) -> "LLMConfig":
-        """Build a config from ``os.environ``.
 
-        Falls back to defaults when keys are missing. Never raises.
-        """
+def has_any_provider() -> bool:
+    """True if at least one LLM provider is enabled + usable from current env.
 
-        ollama_url = _get("OLLAMA_URL", "http://localhost:11434")
-        ollama_model = _get("OLLAMA_MODEL", "qwen2.5:7b")
-
-        api_key = _get("OPENCODE_ZEN_API_KEY", "")
-        base_url = _get(
-            "OPENCODE_ZEN_BASE_URL", "https://opencode.ai/zen/v1"
-        )
-        default_zen_model = _get(
-            "OPENCODE_ZEN_DEFAULT_MODEL", "deepseek-v4-flash-free"
-        )
-
-        default_level = _get("LLM_DEFAULT_LEVEL", "moderate")
-        auto_route = _truthy(_get("LLM_AUTO_ROUTE", "true"))
-
-        return cls(
-            ollama_url=ollama_url,
-            ollama_model=ollama_model,
-            opencode_zen_api_key=api_key,
-            opencode_zen_base_url=base_url,
-            opencode_zen_default_model=default_zen_model,
-            default_level=default_level,
-            auto_route=auto_route,
-        )
+    Convenience wrapper around ``LLMConfig.has_any_provider`` that always
+    reads the latest env values (mirrors ``get_llm_config``).
+    """
+    return get_llm_config().has_any_provider()
 
 
-__all__ = ["LLMConfig"]
+def resolve_for_level(level: str) -> tuple[str, str]:
+    """Return ``(provider_name, model_id)`` for the given level from current env.
+
+    Convenience wrapper around ``LLMConfig.resolve_for_level`` that always
+    reads the latest env values.
+    """
+    return get_llm_config().resolve_for_level(level)
