@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
@@ -23,7 +24,34 @@ from core.agent import Agent
 from rag.retriever import Retriever
 import config
 
-app = FastAPI(title="AI Agent")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global model_loaded, model_name, retriever
+    try:
+        agent.model = LLM(backend=config.BACKEND)
+        agent.model.load()
+        model_loaded = True
+        if config.BACKEND == "ollama":
+            model_name = f"Ollama: {config.OLLAMA_MODEL}"
+        else:
+            model_name = Path(config.MODEL_PATH).name
+        agent.memory.load()
+        print(f"Model loaded: {model_name}")
+    except Exception as e:
+        print(f"Model load (deferred): {e}")
+
+    try:
+        retriever = Retriever()
+        retriever.load_or_init()
+        print("RAG retriever initialized")
+    except Exception as e:
+        print(f"RAG init: {e}")
+
+    yield
+
+
+app = FastAPI(title="AI Agent", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -48,30 +76,6 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     text: str
-
-
-@app.on_event("startup")
-async def startup():
-    global model_loaded, model_name, retriever
-    try:
-        agent.model = LLM(backend=config.BACKEND)
-        agent.model.load()
-        model_loaded = True
-        if config.BACKEND == "ollama":
-            model_name = f"Ollama: {config.OLLAMA_MODEL}"
-        else:
-            model_name = Path(config.MODEL_PATH).name
-        agent.memory.load()
-        print(f"Model loaded: {model_name}")
-    except Exception as e:
-        print(f"Model load (deferred): {e}")
-
-    try:
-        retriever = Retriever()
-        retriever.load_or_init()
-        print("RAG retriever initialized")
-    except Exception as e:
-        print(f"RAG init: {e}")
 
 
 @app.get("/status")
