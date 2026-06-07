@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import uvicorn
 
 from core.model import LLM
@@ -68,8 +68,8 @@ model_name = ""
 
 
 class ChatRequest(BaseModel):
-    conversation_id: str = ""
-    message: str
+    conversation_id: str = Field(default="", pattern=r"^(|conv_[a-zA-Z0-9_]+)$")
+    message: str = Field(..., min_length=1)
     stream: bool = True
     use_rag: bool = False
 
@@ -84,6 +84,7 @@ async def get_status():
         "model_loaded": model_loaded,
         "model_name": model_name if model_loaded else "",
         "conversations": len(agent.memory.conversations),
+        "current_conversation": agent.memory.current_id,
     }
 
 
@@ -91,9 +92,88 @@ async def get_status():
 async def get_stats():
     return {
         "tool_count": len(agent.tools.list_tools()),
+        "tool_count_total": len(agent.tools.list_all_tools()),
         "plugin_count": len(agent.plugins.plugins) if agent.plugins else 0,
         "model_loaded": model_loaded,
+        "tool_stats": getattr(agent.tools, "get_tool_stats", lambda: {})(),
+        "memory_stats": {
+            "conversations": len(getattr(agent.memory, "conversations", {})),
+            "current_id": getattr(agent.memory, "current_id", ""),
+            "history": len(getattr(agent.memory, "get_history", lambda: [])() or []),
+        },
+        "cache_stats": len(getattr(agent.context, "_context_cache", {})),
+        "rag_stats": {
+            "enabled": bool(retriever),
+            "documents": len(getattr(retriever, "docs", [])) if retriever else 0,
+        },
+        "fast_mode": getattr(config, "FAST_MODE", "auto"),
+        "rag_enabled": getattr(config, "RAG_ENABLED", False),
     }
+
+
+@app.get("/settings")
+async def get_settings():
+    return {
+        "fast_mode": config.FAST_MODE,
+        "rag_enabled": getattr(config, "RAG_ENABLED", False),
+        "cache_ttl": config.CACHE_TTL,
+        "model": model_name,
+        "tools_enabled": len(agent.tools.list_tools()),
+        "tools_total": len(agent.tools.list_all_tools()),
+        "cache_stats": len(getattr(agent.context, "_context_cache", {})),
+    }
+
+
+@app.get("/tools")
+async def list_tools_endpoint():
+    categories = agent.tools.list_tools_by_category_all()
+    tools_dict = {}
+    for cat, tool_list in categories.items():
+        tools_dict[cat] = [
+            {"name": t.name, "description": t.description} for t in tool_list
+        ]
+    return {
+        "tools": tools_dict,
+        "total": len(agent.tools.list_all_tools()),
+        "enabled": len(agent.tools.list_tools()),
+    }
+
+
+@app.post("/settings/fast-mode")
+async def toggle_fast_mode():
+    modes = ["on", "off", "auto"]
+    try:
+        current = config.FAST_MODE
+        idx = modes.index(current) if current in modes else 0
+    except (AttributeError, ValueError):
+        idx = 0
+    new_mode = modes[(idx + 1) % len(modes)]
+    config.FAST_MODE = new_mode
+    return {"fast_mode": new_mode}
+
+
+@app.post("/settings/rag")
+async def toggle_rag():
+    current = bool(getattr(config, "RAG", False))
+    new_val = not current
+    config.RAG = new_val
+    return {"rag_enabled": new_val}
+
+
+@app.post("/tools/{name}/enable")
+async def enable_tool_endpoint(name: str):
+    ok = agent.tools.enable_tool(name)
+    if ok:
+        return {"status": "ok", "name": name, "enabled": True}
+    return {"status": "not_found"}
+
+
+@app.post("/tools/{name}/disable")
+async def disable_tool_endpoint(name: str):
+    ok = agent.tools.disable_tool(name)
+    if ok:
+        return {"status": "ok", "name": name, "enabled": False}
+    return {"status": "not_found"}
 
 
 @app.post("/conversations/new")
@@ -182,13 +262,16 @@ async def chat(req: ChatRequest):
                 full += chunk
                 yield f"data: {json.dumps({'text': chunk})}\n\n"
 
-            max_loops = 3
+            max_loops = 5
             loop_count = 0
             while agent.tools.contains_tool_call(full) and loop_count < max_loops:
                 loop_count += 1
-                tool_results = agent.tools.parse_and_execute(full)
+                tool_calls, tool_results = agent.tools.parse_and_execute(full)
+                for tc in tool_calls:
+                    yield f"data: {json.dumps({'tool_call': tc})}\n\n"
                 for tr in tool_results:
                     agent.memory.add_message("system", f"Tool: {tr}")
+                    yield f"data: {json.dumps({'tool_result': tr})}\n\n"
 
                 prompt = agent.context.build_with_tool_results(
                     user_input=enriched,
@@ -206,7 +289,7 @@ async def chat(req: ChatRequest):
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
     else:
-        response = agent.chat(enriched, stream=False)
+        response = await agent.achat(enriched, stream=False)
         return {"text": response}
 
 
