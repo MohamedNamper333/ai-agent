@@ -1,18 +1,16 @@
-"""Ollama provider — wraps the existing core.model.LLM class.
+"""Ollama provider — wraps core.model.LLM.
 
-This provider is the local/free default for SIMPLE-level requests.
-It reuses the existing LLM implementation (which already handles
-GPT4All fallback and Ollama HTTP transport).
+FIX: LLM.__init__ only accepts `backend` param, not `model_ref`.
+     We now configure the Ollama connection manually after construction.
 """
 from __future__ import annotations
 
 import time
-from typing import Any, Iterator, Optional
+from typing import Any, Iterator
 
 import requests
 
 from core.model import LLM
-
 from .base import (
     BaseLLM,
     LLMError,
@@ -40,13 +38,23 @@ class OllamaProvider(BaseLLM):
         self._init_llm()
 
     def _init_llm(self) -> None:
+        """
+        FIXED: LLM.__init__ accepts only `backend` (str), not `model_ref`.
+        We create LLM with backend="ollama" then configure the connection
+        attributes directly — identical to what LLM._setup_ollama() does,
+        but without triggering the network health-check at init time.
+        """
         try:
-            self._llm = LLM(model_ref=self.model)
+            self._llm = LLM(backend="ollama")
+            # Mirror what _setup_ollama() sets, without the network call:
+            self._llm._use_ollama = True
+            self._llm._ollama_model = self.model
+            self._llm._ollama_base = self.url
         except Exception as e:
             raise ProviderUnavailable(
-                f"Failed to initialize LLM: {e}",
+                f"Failed to initialize Ollama LLM: {e}",
                 provider=self.provider_name,
-            )
+            ) from e
 
     def is_available(self) -> bool:
         if self._llm is None:
@@ -78,6 +86,7 @@ class OllamaProvider(BaseLLM):
                 retries=1,
             )
         except TypeError:
+            # Fallback for older LLM signature without `retries`
             try:
                 text = self._llm.generate(
                     prompt=request.prompt,

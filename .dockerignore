@@ -1,0 +1,65 @@
+# ── Python cache ──────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Virtual environments ───────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Testing ───────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# ── IDE ───────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── OS ────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Data / Logs (mounted as volumes in docker-compose) ────────
+logs/
+*.log
+memory_store.json
+vector_store.json
+users.json
+notifications.json
+scheduler_tasks.json
+long_term_memory.json
+
+# ── Models (large binary files — mount separately) ─────────
+models/*.gguf
+models/*.bin
+
+# ── Git ───────────────────────────────────────
+.git/
+.gitignore
+.github/
+
+# ── Docs / Dev files ──────────────────────────
+docs/
+*.md
+benchmark_*.py
+IMPROVEMENT_LOG.md
+install.ps1
+launcher.ps1
+
+# ── Secrets ───────────────────────────────────
+.env
+.env.*
+!.env.example

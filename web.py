@@ -1,4 +1,12 @@
-"""AI Agent - Web server (FastAPI)"""
+"""AI Agent - Web server (FastAPI)
+
+FIXES applied vs original:
+  1. Auth middleware now validates Bearer token on protected endpoints
+  2. Rate limiting middleware active on ALL requests
+  3. Auth endpoints added: /auth/register, /auth/users, /auth/me
+  4. toggle_rag fixed: was using config.RAG not config.RAG_ENABLED
+  5. stats endpoint: cache_stats was int not dict
+"""
 
 import json
 import os
@@ -11,9 +19,10 @@ from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Depends, Security
+from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 import uvicorn
 
@@ -22,21 +31,45 @@ from core.memory import ConversationMemory
 from core.tools import ToolRegistry
 from core.context import ContextManager
 from core.agent import Agent
+from core.auth import AuthManager, UserRole, User, get_auth_manager
+from core.rate_limiter import get_rate_limiter
 from rag.retriever import Retriever
 import config
 
+# ─────────────────────────────────────────────
+#  Security scheme
+# ─────────────────────────────────────────────
+_bearer = HTTPBearer(auto_error=False)
 
+
+def _get_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(_bearer),
+) -> Optional[User]:
+    """Extract user from Bearer token if present (returns None if absent)."""
+    if not credentials:
+        return None
+    return get_auth_manager().get_user_by_api_key(credentials.credentials)
+
+
+def _require_user(user: Optional[User] = Depends(_get_user)) -> User:
+    """Raise 401 if no valid API key provided."""
+    if user is None:
+        raise HTTPException(status_code=401, detail="Valid API key required. Use: Authorization: Bearer <api_key>")
+    return user
+
+
+def _require_admin(user: User = Depends(_require_user)) -> User:
+    """Raise 403 if user is not admin."""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+
+# ─────────────────────────────────────────────
+#  Server State
+# ─────────────────────────────────────────────
 @dataclass
 class ServerState:
-    """Mutable server state — replaces module-level globals.
-
-    All mutable state lives here and is attached to ``app.state`` so that
-    endpoints access it via ``request.app.state.srv`` instead of reading
-    module-level globals.  This makes the server testable without
-    monkey-patching module attributes and is the standard FastAPI pattern
-    for dependency injection.
-    """
-
     agent: Agent = field(default_factory=Agent)
     model_loaded: bool = False
     model_name: str = ""
@@ -46,6 +79,10 @@ class ServerState:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     srv: ServerState = app.state.srv
+
+    # Load auth manager
+    get_auth_manager().load()
+
     try:
         srv.agent.model = LLM(backend=config.BACKEND)
         srv.agent.model.load()
@@ -69,10 +106,50 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="AI Agent", lifespan=lifespan)
+app = FastAPI(
+    title="AI Agent",
+    version="2.0.0",
+    description="AI Agent Platform — Auth + Rate Limited",
+    lifespan=lifespan,
+)
 app.state.srv = ServerState()
 
 
+# ─────────────────────────────────────────────
+#  Rate Limiting Middleware
+# ─────────────────────────────────────────────
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    """Global rate limiting — applied to every HTTP request."""
+    limiter = get_rate_limiter()
+    client_ip = request.client.host if request.client else "unknown"
+
+    # Determine tier from auth header if present
+    tier = "anonymous"
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        api_key = auth_header[7:]
+        user = get_auth_manager().get_user_by_api_key(api_key)
+        if user:
+            tier = user.role.value  # "basic", "admin", etc.
+
+    if not limiter.is_allowed(client_ip, tier):
+        remaining = limiter.get_remaining(client_ip, tier)
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Rate limit exceeded. Slow down."},
+            headers={"X-RateLimit-Remaining": str(remaining)},
+        )
+
+    response = await call_next(request)
+    remaining = limiter.get_remaining(client_ip, tier)
+    response.headers["X-RateLimit-Remaining"] = str(remaining)
+    return response
+
+
+# ─────────────────────────────────────────────
+#  CORS (dynamic, cached)
+# ─────────────────────────────────────────────
 def _resolve_cors_config():
     raw = (config.CORS_ORIGINS or "").strip()
     if not raw:
@@ -85,27 +162,7 @@ def _resolve_cors_config():
     return origins, True
 
 
-_cors_origins, _cors_allow_credentials = _resolve_cors_config()
-
-
 class _DynamicCORSMiddleware:
-    """CORS middleware that re-reads config per request with a small cache.
-
-    The default Starlette ``CORSMiddleware`` freezes ``allow_origins`` and
-    ``allow_credentials`` at install time (when ``app.add_middleware`` is
-    called), so any runtime change to ``config.CORS_ORIGINS`` (by tests
-    patching config, or by a future config-reload feature) would not be
-    picked up by the running server. This wrapper delegates each HTTP
-    request to a ``CORSMiddleware`` built from the current config, ensuring
-    the active configuration is always honoured.
-
-    To avoid allocating a fresh ``CORSMiddleware`` on every request, the
-    last-built instance is cached and reused as long as the configuration
-    key ``(tuple(origins), credentials)`` is unchanged. When the key
-    changes (e.g. test patches ``config.CORS_ORIGINS``) the cache is
-    invalidated and the next request rebuilds the middleware.
-    """
-
     def __init__(self, app):
         self.app = app
         self._cache_key = None
@@ -132,6 +189,9 @@ class _DynamicCORSMiddleware:
 app.add_middleware(_DynamicCORSMiddleware)
 
 
+# ─────────────────────────────────────────────
+#  Request Models
+# ─────────────────────────────────────────────
 class ChatRequest(BaseModel):
     conversation_id: str = Field(default="", pattern=r"^(|conv_[a-zA-Z0-9_]+)$")
     message: str = Field(..., min_length=1)
@@ -139,11 +199,77 @@ class ChatRequest(BaseModel):
     use_rag: bool = False
 
 
-class ChatResponse(BaseModel):
-    text: str
+class RegisterRequest(BaseModel):
+    username: str = Field(..., min_length=3, max_length=50)
+    role: str = Field(default="basic")
 
 
-@app.get("/status")
+# ─────────────────────────────────────────────
+#  Auth Endpoints  ← NEW
+# ─────────────────────────────────────────────
+@app.post("/auth/register", tags=["auth"])
+async def register(req: RegisterRequest, admin: User = Depends(_require_admin)):
+    """Register a new user. Admin only."""
+    try:
+        role = UserRole(req.role)
+    except ValueError:
+        raise HTTPException(400, f"Invalid role '{req.role}'. Choose: basic, admin")
+
+    auth = get_auth_manager()
+    # Check duplicate
+    for u in auth._users.values():
+        if u.username == req.username:
+            raise HTTPException(400, f"Username '{req.username}' already exists")
+
+    user = auth.create_user(req.username, role)
+    return {
+        "user_id": user.user_id,
+        "username": user.username,
+        "role": user.role.value,
+        "api_key": user.api_key,
+    }
+
+
+@app.get("/auth/me", tags=["auth"])
+async def get_me(user: User = Depends(_require_user)):
+    """Return current user info."""
+    return {
+        "user_id": user.user_id,
+        "username": user.username,
+        "role": user.role.value,
+        "is_active": user.is_active,
+    }
+
+
+@app.get("/auth/users", tags=["auth"])
+async def list_users(admin: User = Depends(_require_admin)):
+    """List all users. Admin only."""
+    return {"users": get_auth_manager().list_users()}
+
+
+@app.post("/auth/init-admin", tags=["auth"])
+async def init_admin():
+    """Create default admin if none exists. Call once after fresh install."""
+    auth = get_auth_manager()
+    # Only allowed if NO admin exists
+    has_admin = any(u.role == UserRole.ADMIN for u in auth._users.values())
+    if has_admin:
+        raise HTTPException(400, "Admin already exists. Use /auth/register instead.")
+    user = auth.create_default_admin()
+    if user is None:
+        raise HTTPException(500, "Failed to create admin")
+    return {
+        "user_id": user.user_id,
+        "username": user.username,
+        "api_key": user.api_key,
+        "message": "SAVE THIS API KEY — it will not be shown again",
+    }
+
+
+# ─────────────────────────────────────────────
+#  System Endpoints (public, rate-limited)
+# ─────────────────────────────────────────────
+@app.get("/status", tags=["system"])
 async def get_status(request: Request):
     srv: ServerState = request.app.state.srv
     return {
@@ -154,31 +280,26 @@ async def get_status(request: Request):
     }
 
 
-@app.get("/stats")
-async def get_stats(request: Request):
+@app.get("/stats", tags=["system"])
+async def get_stats(request: Request, user: Optional[User] = Depends(_get_user)):
+    """Stats — public for basic info, richer for authenticated users."""
     srv: ServerState = request.app.state.srv
-    return {
+    base = {
         "tool_count": len(srv.agent.tools.list_tools()),
         "tool_count_total": len(srv.agent.tools.list_all_tools()),
         "plugin_count": len(srv.agent.plugins.plugins) if srv.agent.plugins else 0,
         "model_loaded": srv.model_loaded,
-        "tool_stats": getattr(srv.agent.tools, "get_tool_stats", lambda: {})(),
-        "memory_stats": {
-            "conversations": len(getattr(srv.agent.memory, "conversations", {})),
-            "current_id": getattr(srv.agent.memory, "current_id", ""),
-            "history": len(getattr(srv.agent.memory, "get_history", lambda: [])() or []),
-        },
-        "cache_stats": len(getattr(srv.agent.context, "_context_cache", {})),
-        "rag_stats": {
-            "enabled": bool(srv.retriever),
-            "documents": len(getattr(srv.retriever, "docs", [])) if srv.retriever else 0,
-        },
+        "tool_stats": getattr(srv.agent.tools, "get_registry_stats", lambda: {})(),
+        "memory_stats": srv.agent.context.get_stats(),
+        "cache_stats": srv.agent.get_cache_stats(),
+        "rag_stats": srv.retriever.get_stats() if srv.retriever else {},
         "fast_mode": getattr(config, "FAST_MODE", "auto"),
         "rag_enabled": getattr(config, "RAG_ENABLED", False),
     }
+    return base
 
 
-@app.get("/settings")
+@app.get("/settings", tags=["system"])
 async def get_settings(request: Request):
     srv: ServerState = request.app.state.srv
     return {
@@ -188,19 +309,41 @@ async def get_settings(request: Request):
         "model": srv.model_name,
         "tools_enabled": len(srv.agent.tools.list_tools()),
         "tools_total": len(srv.agent.tools.list_all_tools()),
-        "cache_stats": len(getattr(srv.agent.context, "_context_cache", {})),
+        "cache_stats": srv.agent.get_cache_stats(),
     }
 
 
-@app.get("/tools")
-async def list_tools_endpoint(request: Request):
+@app.post("/settings/fast-mode", tags=["system"])
+async def toggle_fast_mode(user: User = Depends(_require_user)):
+    """Toggle fast mode. Requires auth."""
+    modes = ["on", "off", "auto"]
+    try:
+        idx = modes.index(config.FAST_MODE) if config.FAST_MODE in modes else 0
+    except (AttributeError, ValueError):
+        idx = 0
+    config.FAST_MODE = modes[(idx + 1) % len(modes)]
+    return {"fast_mode": config.FAST_MODE}
+
+
+@app.post("/settings/rag", tags=["system"])
+async def toggle_rag(user: User = Depends(_require_user)):
+    """Toggle RAG. Requires auth. FIX: was config.RAG, now config.RAG_ENABLED."""
+    config.RAG_ENABLED = not getattr(config, "RAG_ENABLED", True)
+    return {"rag_enabled": config.RAG_ENABLED}
+
+
+# ─────────────────────────────────────────────
+#  Tool Endpoints (require auth)
+# ─────────────────────────────────────────────
+@app.get("/tools", tags=["tools"])
+async def list_tools_endpoint(request: Request, user: Optional[User] = Depends(_get_user)):
     srv: ServerState = request.app.state.srv
     categories = srv.agent.tools.list_tools_by_category_all()
-    tools_dict = {}
-    for cat, tool_list in categories.items():
-        tools_dict[cat] = [
-            {"name": t.name, "description": t.description} for t in tool_list
-        ]
+    tools_dict = {
+        cat: [{"name": t.name, "description": t.description, "enabled": t.name in srv.agent.tools._enabled}
+              for t in tool_list]
+        for cat, tool_list in categories.items()
+    }
     return {
         "tools": tools_dict,
         "total": len(srv.agent.tools.list_all_tools()),
@@ -208,54 +351,52 @@ async def list_tools_endpoint(request: Request):
     }
 
 
-@app.post("/settings/fast-mode")
-async def toggle_fast_mode():
-    modes = ["on", "off", "auto"]
-    try:
-        current = config.FAST_MODE
-        idx = modes.index(current) if current in modes else 0
-    except (AttributeError, ValueError):
-        idx = 0
-    new_mode = modes[(idx + 1) % len(modes)]
-    config.FAST_MODE = new_mode
-    return {"fast_mode": new_mode}
-
-
-@app.post("/settings/rag")
-async def toggle_rag():
-    current = bool(getattr(config, "RAG", False))
-    new_val = not current
-    config.RAG = new_val
-    return {"rag_enabled": new_val}
-
-
-@app.post("/tools/{name}/enable")
-async def enable_tool_endpoint(name: str, request: Request):
+@app.post("/tools/{name}/enable", tags=["tools"])
+async def enable_tool_endpoint(name: str, request: Request, user: User = Depends(_require_user)):
     srv: ServerState = request.app.state.srv
     ok = srv.agent.tools.enable_tool(name)
-    if ok:
-        return {"status": "ok", "name": name, "enabled": True}
-    return {"status": "not_found"}
+    return {"status": "ok", "name": name, "enabled": True} if ok else {"status": "not_found"}
 
 
-@app.post("/tools/{name}/disable")
-async def disable_tool_endpoint(name: str, request: Request):
+@app.post("/tools/{name}/disable", tags=["tools"])
+async def disable_tool_endpoint(name: str, request: Request, user: User = Depends(_require_user)):
     srv: ServerState = request.app.state.srv
     ok = srv.agent.tools.disable_tool(name)
-    if ok:
-        return {"status": "ok", "name": name, "enabled": False}
-    return {"status": "not_found"}
+    return {"status": "ok", "name": name, "enabled": False} if ok else {"status": "not_found"}
 
 
-@app.post("/conversations/new")
-async def new_conversation(request: Request):
+@app.post("/tools/category/{category}/enable", tags=["tools"])
+async def enable_category(category: str, request: Request, user: User = Depends(_require_user)):
+    srv: ServerState = request.app.state.srv
+    count = srv.agent.tools.enable_category(category)
+    return {"status": "ok", "category": category, "count": count}
+
+
+@app.post("/tools/category/{category}/disable", tags=["tools"])
+async def disable_category(category: str, request: Request, user: User = Depends(_require_user)):
+    srv: ServerState = request.app.state.srv
+    count = srv.agent.tools.disable_category(category)
+    return {"status": "ok", "category": category, "count": count}
+
+
+@app.get("/tool-stats", tags=["tools"])
+async def get_tool_stats(request: Request, user: User = Depends(_require_user)):
+    srv: ServerState = request.app.state.srv
+    return {"stats": srv.agent.tools.get_tool_stats()}
+
+
+# ─────────────────────────────────────────────
+#  Conversation Endpoints (require auth)
+# ─────────────────────────────────────────────
+@app.post("/conversations/new", tags=["conversations"])
+async def new_conversation(request: Request, user: User = Depends(_require_user)):
     srv: ServerState = request.app.state.srv
     cid = srv.agent.memory.new_conversation()
     return {"conversation_id": cid}
 
 
-@app.get("/conversations")
-async def list_conversations(request: Request):
+@app.get("/conversations", tags=["conversations"])
+async def list_conversations(request: Request, user: User = Depends(_require_user)):
     srv: ServerState = request.app.state.srv
     return {
         "conversations": srv.agent.memory.list_conversations(),
@@ -263,8 +404,8 @@ async def list_conversations(request: Request):
     }
 
 
-@app.get("/conversations/{conv_id}")
-async def get_conversation(conv_id: str, request: Request):
+@app.get("/conversations/{conv_id}", tags=["conversations"])
+async def get_conversation(conv_id: str, request: Request, user: User = Depends(_require_user)):
     srv: ServerState = request.app.state.srv
     if conv_id not in srv.agent.memory.conversations:
         raise HTTPException(404, "Conversation not found")
@@ -272,8 +413,8 @@ async def get_conversation(conv_id: str, request: Request):
     return {"conversation_id": conv_id, "messages": msgs}
 
 
-@app.delete("/conversations/{conv_id}")
-async def delete_conversation(conv_id: str, request: Request):
+@app.delete("/conversations/{conv_id}", tags=["conversations"])
+async def delete_conversation(conv_id: str, request: Request, user: User = Depends(_require_user)):
     srv: ServerState = request.app.state.srv
     if conv_id in srv.agent.memory.conversations:
         srv.agent.memory.delete_conversation(conv_id)
@@ -281,15 +422,23 @@ async def delete_conversation(conv_id: str, request: Request):
     raise HTTPException(404, "Conversation not found")
 
 
-@app.post("/chat")
-async def chat(req: ChatRequest, request: Request):
+# ─────────────────────────────────────────────
+#  Chat Endpoint (require auth)
+# ─────────────────────────────────────────────
+@app.post("/chat", tags=["chat"])
+async def chat(req: ChatRequest, request: Request, user: User = Depends(_require_user)):
     srv: ServerState = request.app.state.srv
+
     if not srv.model_loaded:
         try:
             srv.agent.model = LLM(backend=config.BACKEND)
             srv.agent.model.load()
             srv.model_loaded = True
-            srv.model_name = f"Ollama: {config.OLLAMA_MODEL}" if config.BACKEND == "ollama" else Path(config.MODEL_PATH).name
+            srv.model_name = (
+                f"Ollama: {config.OLLAMA_MODEL}"
+                if config.BACKEND == "ollama"
+                else Path(config.MODEL_PATH).name
+            )
         except Exception as e:
             raise HTTPException(503, f"Model not loaded: {e}")
 
@@ -299,19 +448,15 @@ async def chat(req: ChatRequest, request: Request):
     else:
         cid = srv.agent.memory.new_conversation()
 
+    enriched = req.message
     if req.use_rag and srv.retriever:
         rag_context = srv.retriever.query_text(req.message)
         if rag_context:
             enriched = f"[Retrieved knowledge]\n{rag_context}\n\nUser question: {req.message}"
-        else:
-            enriched = req.message
-    else:
-        enriched = req.message
 
-    # Multi-agent council route
     msg_lower = req.message.lower()
-    if '/council' in msg_lower or 'council this' in msg_lower:
-        topic = req.message.replace('/council', '').replace('council this', '').strip()
+    if "/council" in msg_lower or "council this" in msg_lower:
+        topic = req.message.replace("/council", "").replace("council this", "").strip()
         from tools.multi_agent import MultiAgentOrchestrator
         council = MultiAgentOrchestrator(model=srv.agent.model)
         result = council.run_council(topic or enriched)
@@ -327,11 +472,8 @@ async def chat(req: ChatRequest, request: Request):
             )
             tool_desc = srv.agent.tools.format_for_prompt()
             prompt = srv.agent.context.build_prompt(
-                user_input=enriched,
-                history=history,
-                tool_descriptions=tool_desc,
+                user_input=enriched, history=history, tool_descriptions=tool_desc,
             )
-
             full = ""
             for chunk in srv.agent.model.generate(prompt, stream=True):
                 full += chunk
@@ -347,12 +489,9 @@ async def chat(req: ChatRequest, request: Request):
                 for tr in tool_results:
                     srv.agent.memory.add_message("system", f"Tool: {tr}")
                     yield f"data: {json.dumps({'tool_result': tr})}\n\n"
-
                 prompt = srv.agent.context.build_with_tool_results(
-                    user_input=enriched,
-                    tool_results=tool_results,
-                    history=history,
-                    tool_descriptions=tool_desc,
+                    user_input=enriched, tool_results=tool_results,
+                    history=history, tool_descriptions=tool_desc,
                 )
                 full = ""
                 for chunk in srv.agent.model.generate(prompt, stream=True):
@@ -368,26 +507,49 @@ async def chat(req: ChatRequest, request: Request):
         return {"text": response}
 
 
-@app.post("/upload")
-async def upload_file(file: UploadFile = File(...), request: Request = None):
+# ─────────────────────────────────────────────
+#  Upload & Execution History (require auth)
+# ─────────────────────────────────────────────
+@app.post("/upload", tags=["rag"])
+async def upload_file(
+    file: UploadFile = File(...),
+    request: Request = None,
+    user: User = Depends(_require_user),
+):
     srv: ServerState = request.app.state.srv
     if srv.retriever is None:
         raise HTTPException(503, "RAG not initialized")
 
-    content = await file.read()
-    text = content.decode("utf-8", errors="replace")
+    allowed = {".txt", ".md", ".py", ".json", ".csv", ".pdf", ".docx"}
+    suffix = Path(file.filename).suffix.lower()
+    if suffix not in allowed:
+        raise HTTPException(400, f"File type '{suffix}' not allowed. Allowed: {allowed}")
 
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(413, "File too large. Max 10MB.")
+
+    text = content.decode("utf-8", errors="replace")
     count = srv.retriever.add_document(text, {"source": file.filename})
     srv.retriever.save()
     return {"status": "ok", "file": file.filename, "chunks": count}
 
 
-@app.get("/")
+@app.get("/execution-history", tags=["agent"])
+async def get_execution_history(request: Request, user: User = Depends(_require_user)):
+    srv: ServerState = request.app.state.srv
+    return {"history": srv.agent.get_execution_history()}
+
+
+# ─────────────────────────────────────────────
+#  Static Files
+# ─────────────────────────────────────────────
+@app.get("/", include_in_schema=False)
 async def webui():
     return FileResponse(Path(__file__).parent / "web" / "index.html")
 
 
-@app.get("/{path:path}")
+@app.get("/{path:path}", include_in_schema=False)
 async def static_files(path: str):
     filepath = Path(__file__).parent / "web" / path
     if filepath.exists() and filepath.is_file():
@@ -399,6 +561,7 @@ def run_server(host: str = "", port: int = 0):
     host = host or config.WEB_HOST
     port = port or config.WEB_PORT
     print(f"Web UI: http://{host}:{port}")
+    print(f"API Docs: http://{host}:{port}/docs")
     uvicorn.run(app, host=host, port=port, log_level="info")
 
 
