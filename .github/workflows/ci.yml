@@ -1,0 +1,193 @@
+name: AI Agent CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHON_VERSION: "3.11"
+  IMAGE_NAME: ai-agent
+
+jobs:
+  # ─────────────────────────────────────────
+  #  1. Lint & Type Check
+  # ─────────────────────────────────────────
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install lint tools
+        run: pip install ruff mypy
+
+      - name: Ruff lint
+        run: ruff check . --select E,F,W,I --ignore E501
+
+      - name: Ruff format check
+        run: ruff format --check .
+
+  # ─────────────────────────────────────────
+  #  2. Test Suite
+  # ─────────────────────────────────────────
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    needs: lint
+
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov httpx
+
+      - name: Run tests with coverage
+        env:
+          SECRET_KEY: test-secret-key-for-ci
+          API_KEY_HASH_SALT: test-salt-for-ci
+          CORS_ORIGINS: http://localhost:8080
+          LOG_LEVEL: WARNING
+          BACKEND: auto
+          OPENCODE_ZEN_KEY: test-key
+        run: |
+          python -m pytest tests/ \
+            --cov=core \
+            --cov=tools \
+            --cov=rag \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --cov-fail-under=80 \
+            -v \
+            --tb=short \
+            -x
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        if: matrix.python-version == '3.11'
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
+
+  # ─────────────────────────────────────────
+  #  3. Security Scan
+  # ─────────────────────────────────────────
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install bandit
+        run: pip install bandit[toml]
+
+      - name: Run bandit security scan
+        run: |
+          bandit -r core/ tools/ rag/ \
+            -ll \
+            --skip B101,B601 \
+            -f json \
+            -o bandit-report.json || true
+
+      - name: Upload security report
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-security-report
+          path: bandit-report.json
+
+  # ─────────────────────────────────────────
+  #  4. Build Docker Image
+  # ─────────────────────────────────────────
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [test, security]
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+
+  # ─────────────────────────────────────────
+  #  5. Deploy to Production
+  # ─────────────────────────────────────────
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_URL }}
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd /opt/ai-agent
+            docker compose pull
+            docker compose up -d --remove-orphans
+            docker system prune -f
+            echo "Deployed: $(date)"
+            curl -sf http://localhost:8080/status | python3 -m json.tool
