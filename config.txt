@@ -1,8 +1,8 @@
 # AI Agent Configuration
 # Backend: "gpt4all" (Python package) or "llama" (direct GGUF)
-BACKEND = gpt4all
-GPT4ALL_MODEL = Phi-3-mini-4k-instruct.Q4_0.gguf
-GPT4ALL_MODEL_DIR = C:\Users\coman\.cache\gpt4all
+BACKEND = ollama
+OLLAMA_MODEL = qwen3:8b
+OLLAMA_BASE = http://127.0.0.1:11434
 N_GPU_LAYERS = -1
 N_THREADS = 6
 

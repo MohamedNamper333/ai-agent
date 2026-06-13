@@ -31,7 +31,7 @@ LOG_LEVEL = get_env("LOG_LEVEL")
 BACKEND = _cfg.get("BACKEND", "auto")
 
 # Ollama
-OLLAMA_MODEL = _cfg.get("OLLAMA_MODEL", "qwen2.5:7b")
+OLLAMA_MODEL = _cfg.get("OLLAMA_MODEL", "qwen3:8b")
 OLLAMA_BASE = _cfg.get("OLLAMA_BASE", "http://127.0.0.1:11434")
 
 # GPT4All

@@ -54,7 +54,7 @@ class LLMConfig:
 
     # Ollama (local, free)
     ollama_url: str = "http://localhost:11434"
-    ollama_model: str = "qwen2.5:7b"
+    ollama_model: str = "qwen3:8b"
     ollama_enabled: bool = True
 
     # OpenCode Zen (cloud, free)
@@ -63,7 +63,7 @@ class LLMConfig:
     opencode_zen_enabled: bool = True
 
     # Model routing per level
-    simple_model: str = "qwen2.5:7b"
+    simple_model: str = "qwen3:8b"
     moderate_model: str = "deepseek-v4-flash-free"
     deep_model: str = "big-pickle"
 
@@ -102,14 +102,14 @@ def get_llm_config() -> LLMConfig:
     """Load LLM config from environment (os.environ > .env > defaults)."""
     return LLMConfig(
         ollama_url=get_env("OLLAMA_URL", "http://localhost:11434") or "http://localhost:11434",
-        ollama_model=get_env("OLLAMA_MODEL", "qwen2.5:7b") or "qwen2.5:7b",
+        ollama_model=get_env("OLLAMA_MODEL", "qwen3:8b") or "qwen3:8b",
         ollama_enabled=(get_env("OLLAMA_ENABLED", "true") or "true").lower() in ("1", "true", "yes"),
         opencode_zen_url=get_env("OPENCODE_ZEN_URL", "https://opencode.ai/zen/v1")
         or "https://opencode.ai/zen/v1",
         opencode_zen_key=get_env("OPENCODE_ZEN_KEY", "") or "",
         opencode_zen_enabled=(get_env("OPENCODE_ZEN_ENABLED", "true") or "true").lower()
         in ("1", "true", "yes"),
-        simple_model=get_env("LLM_SIMPLE_MODEL", "qwen2.5:7b") or "qwen2.5:7b",
+        simple_model=get_env("LLM_SIMPLE_MODEL", "qwen3:8b") or "qwen3:8b",
         moderate_model=get_env("LLM_MODERATE_MODEL", "deepseek-v4-flash-free")
         or "deepseek-v4-flash-free",
         deep_model=get_env("LLM_DEEP_MODEL", "big-pickle") or "big-pickle",
