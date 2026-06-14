@@ -333,6 +333,95 @@ async def toggle_rag(user: User = Depends(_require_user)):
 
 
 # ─────────────────────────────────────────────
+#  Model Selector Endpoints
+# ─────────────────────────────────────────────
+@app.get("/models", tags=["models"])
+async def list_models(request: Request, user: Optional[User] = Depends(_get_user)):
+    """List all available models across Ollama, GPT4All, and OpenCodeZen."""
+    from core.llm.model_selector import get_model_selector
+    selector = get_model_selector()
+    by_provider = selector.get_models_by_provider()
+    active = selector.get_active_model()
+    return {
+        "active": active,
+        "providers": {
+            provider: [
+                {
+                    "model_id": m.model_id,
+                    "display_name": m.display_name,
+                    "provider": m.provider,
+                    "context_window": m.context_window,
+                    "is_local": m.is_local,
+                    "is_free": m.is_free,
+                    "size_gb": m.size_gb,
+                    "description": m.description,
+                    "label": m.label,
+                }
+                for m in models
+            ]
+            for provider, models in by_provider.items()
+        },
+    }
+
+
+class SwitchModelRequest(BaseModel):
+    model_id: str = Field(..., min_length=1)
+    provider: str = Field(..., pattern=r"^(ollama|gpt4all|opencode_zen)$")
+
+
+@app.post("/models/switch", tags=["models"])
+async def switch_model(
+    req: SwitchModelRequest,
+    request: Request,
+    user: User = Depends(_require_user),
+):
+    """Switch active model at runtime. Requires auth."""
+    from core.llm.model_selector import get_model_selector
+    selector = get_model_selector()
+
+    # Validate model exists
+    all_models = selector.get_all_models()
+    valid_ids = {m.model_id for m in all_models}
+
+    # For OpenCodeZen, allow any model_id (API validates on use)
+    if req.provider != "opencode_zen" and req.model_id not in valid_ids:
+        raise HTTPException(
+            400,
+            f"Model '{req.model_id}' not found. "
+            f"Available: {[m.model_id for m in all_models if m.provider == req.provider]}"
+        )
+
+    result = selector.switch(req.model_id, req.provider)
+    if result.get("status") != "ok":
+        raise HTTPException(400, result.get("detail", "Switch failed"))
+
+    # Reload agent model
+    srv: ServerState = request.app.state.srv
+    try:
+        from core.model import LLM
+        srv.agent.model = LLM(backend=config.BACKEND)
+        srv.agent.model.load()
+        srv.model_loaded = True
+        srv.model_name = f"{req.provider}: {req.model_id}"
+    except Exception as e:
+        # Model switch saved but agent not reloaded — will reload on next chat
+        result["warning"] = f"Config updated but agent reload failed: {e}. Will reload on next message."
+
+    return {
+        **result,
+        "model_name": f"{req.provider}: {req.model_id}",
+        "active": selector.get_active_model(),
+    }
+
+
+@app.get("/models/active", tags=["models"])
+async def get_active_model(request: Request):
+    """Get the currently active model. Public."""
+    from core.llm.model_selector import get_model_selector
+    return get_model_selector().get_active_model()
+
+
+# ─────────────────────────────────────────────
 #  Tool Endpoints (require auth)
 # ─────────────────────────────────────────────
 @app.get("/tools", tags=["tools"])

@@ -124,9 +124,37 @@ class Agent:
         self._retriever: Optional[Retriever] = None
         self._fast_mode = config.FAST_MODE
 
+        # 4 Pillars
+        self._init_pillars()
+
         self._load_plugins()
         self._start_scheduler()
         self._init_rag()
+
+    def _init_pillars(self) -> None:
+        try:
+            from core.reasoning.deductive_engine import DeductiveEngine
+            self.deductive = DeductiveEngine(model=self.model)
+        except Exception:
+            self.deductive = None
+
+        try:
+            from core.memory.neural_memory import get_neural_memory
+            self.neural_memory = get_neural_memory()
+        except Exception:
+            self.neural_memory = None
+
+        try:
+            from core.memory.obsidian_bridge import get_obsidian_bridge
+            self.obsidian = get_obsidian_bridge()
+        except Exception:
+            self.obsidian = None
+
+        try:
+            from core.learning_engine import get_learning_engine
+            self.learning = get_learning_engine()
+        except Exception:
+            self.learning = None
 
     def think(self, query: str, level: str = "moderate") -> ReasoningChain:
         """Delegate chain-of-thought reasoning to the CoT engine.
@@ -216,6 +244,12 @@ class Agent:
                 self.memory.add_message("assistant", cached)
                 return cached
 
+
+        # Pillar 2: Neural Memory recall
+        neural_ctx = self._recall_neural_memory(user_input)
+        if neural_ctx:
+            user_input = f"{neural_ctx}\n\nUser: {user_input}"
+
         ltm_recall = self._recall_ltm(user_input)
         if ltm_recall:
             user_input = f"{ltm_recall}\n\nUser: {user_input}"
@@ -241,6 +275,8 @@ class Agent:
 
             self.memory.add_message("assistant", response)
             self._auto_summarize(response, user_input)
+            # Pillar 3: Learning Engine — capture interaction
+            self._capture_interaction(user_input, response)
             # Cache the response
             if cache_key:
                 self._cache.set(cache_key, response)
@@ -265,6 +301,94 @@ class Agent:
         except Exception:
             pass
         return ""
+
+    def _recall_neural_memory(self, user_input: str) -> str:
+        """Retrieve relevant memories from Neural Memory (Pillar 2)."""
+        try:
+            if not self.neural_memory:
+                return ""
+            from core.memory.neural_memory import MemoryQuery
+            results = self.neural_memory.recall(MemoryQuery(
+                query_text=user_input, top_k=3, min_importance=0.3
+            ))
+            if not results:
+                return ""
+            parts = ["[Memory context]"]
+            for r in results:
+                if r.relevance_score > 0.3:
+                    parts.append(f"- {r.node.content[:120]}")
+                    if r.node.reasoning:
+                        parts.append(f"  (reason: {r.node.reasoning[:60]})")
+            return "\n".join(parts) if len(parts) > 1 else ""
+        except Exception:
+            return ""
+
+    def _capture_interaction(self, user_input: str, response: str) -> None:
+        """Capture interaction for learning (Pillar 3)."""
+        try:
+            if self.learning:
+                self.learning.capture(
+                    user_input=user_input,
+                    assistant_response=response,
+                    tools_used=[t.name for t in self.tools.list_tools()[:5]],
+                    success=bool(response and len(response) > 10),
+                )
+            if self.neural_memory and len(response) > 50:
+                self.neural_memory.remember(
+                    content=f"Q: {user_input[:100]} A: {response[:200]}",
+                    node_type="observation",
+                    importance=0.4,
+                )
+            if self.obsidian:
+                self.obsidian.log_daily(
+                    summary=f"Q: {user_input[:80]}",
+                    decisions_made=0,
+                    tools_used=[],
+                )
+        except Exception:
+            pass
+
+    def think_deep(self, problem: str, context: str = "") -> str:
+        """Full deductive reasoning on a complex problem (Pillar 1)."""
+        try:
+            if self.deductive:
+                result = self.deductive.think(problem, context)
+                # Store decision in neural memory
+                if self.neural_memory:
+                    self.neural_memory.remember_decision(
+                        decision=result.chosen_plan.description,
+                        reasoning=result.reasoning,
+                        factors=result.chosen_plan.steps[:3],
+                        context=problem[:200],
+                        importance=result.chosen_plan.composite_score,
+                    )
+                # Store in Obsidian
+                if self.obsidian:
+                    self.obsidian.write_decision(
+                        title=problem[:60],
+                        decision=result.chosen_plan.description,
+                        reasoning=result.reasoning[:300],
+                        factors=result.chosen_plan.steps[:5],
+                        alternatives=[result.alternative_considered[:200]],
+                    )
+                return result.to_report()
+        except Exception as e:
+            pass
+        return self.think(problem, level="deep").result
+
+    def get_pillars_status(self) -> dict:
+        """Return health status of all 4 pillars."""
+        return {
+            "deductive_engine": self.deductive is not None,
+            "neural_memory": self.neural_memory is not None,
+            "obsidian_bridge": self.obsidian is not None,
+            "learning_engine": self.learning is not None,
+            "neural_memory_stats": self.neural_memory.get_stats() if self.neural_memory else {},
+            "learning_stats": self.learning.get_stats() if self.learning else {},
+            "obsidian_stats": self.obsidian.get_stats() if self.obsidian else {},
+        }
+
+
 
     def _auto_summarize(self, response: str, user_input: str):
         try:
