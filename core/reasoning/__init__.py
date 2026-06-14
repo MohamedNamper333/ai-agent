@@ -1,8 +1,16 @@
-"""Reasoning Engine — Chain-of-Thought, Verification, Reflection.
+"""Reasoning Engine — Chain-of-Thought + Deductive Engine.
 
-W1 ships CoT only. Verifier and Reflection land in W2.
+Pillar 1: DeductiveEngine — Tree-of-Thought with self-questioning
+CoT: Chain-of-thought base reasoning
 """
 from .cot import CoTEngine, ReasoningChain, ReasoningStep
 from .prompts import CoTPrompts
 
-__all__ = ["CoTEngine", "ReasoningChain", "ReasoningStep", "CoTPrompts"]
+try:
+    from .deductive_engine import DeductiveEngine, DeductiveResult, Plan
+    __all__ = [
+        "CoTEngine", "ReasoningChain", "ReasoningStep", "CoTPrompts",
+        "DeductiveEngine", "DeductiveResult", "Plan",
+    ]
+except ImportError:
+    __all__ = ["CoTEngine", "ReasoningChain", "ReasoningStep", "CoTPrompts"]

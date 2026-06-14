@@ -18,6 +18,11 @@ from .ollama_provider import OllamaProvider
 from .opencode_zen_provider import OpenCodeZenProvider
 from .router import LLMRouter
 
+try:
+    from .model_selector import ModelSelector, ModelInfo, get_model_selector
+except ImportError:
+    pass
+
 __all__ = [
     "AllProvidersFailed",
     "BaseLLM",
