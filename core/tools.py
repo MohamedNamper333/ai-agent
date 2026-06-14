@@ -48,6 +48,10 @@ class ToolRegistry:
             "scheduler": (self._register_scheduler, 3),
             "docker": (self._register_docker_tools, 2),
             "self_improve": (self._register_self_improve, 4),
+            "optimizer": (self._register_optimizer_tools, 3),
+            "deep_analyzer": (self._register_deep_analyzer_tools, 2),
+            "agent_swarm": (self._register_agent_swarm_tools, 4),
+            "model_selector": (self._register_model_selector_tools, 2),
         }
         self._lazy_tool_counts = {}
         for cat, (loader, count) in category_map.items():
@@ -706,6 +710,92 @@ class ToolRegistry:
             "Apply a code improvement to a file. Params: file_path, instructions",
             self._improver.apply_improvement,
             category="self_improve",
+        ))
+
+    def _register_optimizer_tools(self) -> None:
+        from tools.code_optimizer import CodeOptimizer
+        self._code_optimizer = CodeOptimizer(model=getattr(self, "_model", None))
+
+        self.register(Tool(
+            "optimize_code",
+            "Optimize Python code: reduce size 70-90%, remove duplication, apply best practices. Params: code (str), aggressive (bool)",
+            lambda code="", aggressive=False: self._code_optimizer.optimize(code, aggressive).report(),
+            category="optimizer",
+        ))
+        self.register(Tool(
+            "analyze_code_quality",
+            "Compute code quality metrics: complexity, duplication, function lengths. Params: code (str)",
+            lambda code="": self._code_optimizer.analyze(code).summary(),
+            category="optimizer",
+        ))
+        self.register(Tool(
+            "find_code_opportunities",
+            "Find all optimization opportunities in code without modifying it. Params: code (str)",
+            lambda code="": "\n".join(f"[{o.severity.upper()}] {o.description} — {o.suggestion}" for o in self._code_optimizer.find_opportunities(code)),
+            category="optimizer",
+        ))
+
+    def _register_deep_analyzer_tools(self) -> None:
+        from tools.deep_analyzer import DeepAnalyzer
+        self._deep_analyzer = DeepAnalyzer(model=getattr(self, "_model", None))
+
+        self.register(Tool(
+            "deep_analyze_code",
+            "5-pass deep analysis: security vulnerabilities, logic flaws, performance issues, architecture problems. Params: code (str), filename (str)",
+            lambda code="", filename="<code>": self._deep_analyzer.analyze_code(code, filename).to_report(),
+            category="deep_analyzer",
+        ))
+        self.register(Tool(
+            "deep_analyze_file",
+            "Deep analysis of a file on disk. Params: path (str)",
+            lambda path="": self._deep_analyzer.analyze_file(path).to_report(),
+            category="deep_analyzer",
+        ))
+
+    def _register_agent_swarm_tools(self) -> None:
+        from tools.agent_swarm import AgentSwarm
+        self._swarm = AgentSwarm(model=getattr(self, "_model", None))
+
+        self.register(Tool(
+            "swarm_parallel",
+            "Run task through all specialist agents simultaneously (fastest). Best for analysis. Params: task (str)",
+            lambda task="": self._swarm.run_parallel(task).to_text(),
+            category="agent_swarm",
+        ))
+        self.register(Tool(
+            "swarm_pipeline",
+            "Run task as sequential pipeline: researcher→architect→coder→security→critic. Best for implementation. Params: task (str)",
+            lambda task="": self._swarm.run_pipeline(task).to_text(),
+            category="agent_swarm",
+        ))
+        self.register(Tool(
+            "swarm_debate",
+            "Agents debate then synthesize — most accurate for decisions. Params: task (str)",
+            lambda task="": self._swarm.run_debate(task).to_text(),
+            category="agent_swarm",
+        ))
+        self.register(Tool(
+            "swarm_auto",
+            "Auto-selects best swarm pattern (parallel/pipeline/debate) based on task type. Params: task (str)",
+            lambda task="": self._swarm.run_auto(task).to_text(),
+            category="agent_swarm",
+        ))
+
+    def _register_model_selector_tools(self) -> None:
+        from core.llm.model_selector import get_model_selector
+        selector = get_model_selector()
+
+        self.register(Tool(
+            "list_models",
+            "List all available AI models: Ollama (local), GPT4All (local), OpenCodeZen (cloud)",
+            lambda: "\n".join(f"[{m.provider}] {m.model_id} — {m.description}" for m in selector.get_all_models()),
+            category="model_selector",
+        ))
+        self.register(Tool(
+            "switch_model",
+            "Switch the active AI model at runtime. Params: model_id (str), provider (str: ollama|gpt4all|opencode_zen)",
+            lambda model_id="", provider="ollama": str(selector.switch(model_id, provider)),
+            category="model_selector",
         ))
 
     def _invalidate_cache(self) -> None:

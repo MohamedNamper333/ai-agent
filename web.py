@@ -631,6 +631,93 @@ async def get_execution_history(request: Request, user: User = Depends(_require_
 
 
 # ─────────────────────────────────────────────
+#  Pillars Status
+# ─────────────────────────────────────────────
+@app.get("/pillars", tags=["agent"])
+async def get_pillars_status(request: Request, user: User = Depends(_require_user)):
+    """Health and stats for all 4 pillars."""
+    srv: ServerState = request.app.state.srv
+    if hasattr(srv.agent, "get_pillars_status"):
+        return srv.agent.get_pillars_status()
+    return {"error": "Pillars not initialized"}
+
+
+@app.post("/pillars/think", tags=["agent"])
+async def think_deep(request: Request, user: User = Depends(_require_user)):
+    """Full deductive reasoning on a complex problem (Pillar 1)."""
+    body = await request.json()
+    problem = body.get("problem", "")
+    context = body.get("context", "")
+    if not problem:
+        raise HTTPException(400, "problem is required")
+    srv: ServerState = request.app.state.srv
+    if hasattr(srv.agent, "think_deep"):
+        result = srv.agent.think_deep(problem, context)
+        return {"report": result}
+    raise HTTPException(503, "Deductive engine not available")
+
+
+@app.post("/pillars/memory/remember", tags=["agent"])
+async def remember(request: Request, user: User = Depends(_require_user)):
+    """Store something in Neural Memory (Pillar 2)."""
+    body = await request.json()
+    srv: ServerState = request.app.state.srv
+    if not hasattr(srv.agent, "neural_memory") or not srv.agent.neural_memory:
+        raise HTTPException(503, "Neural memory not available")
+    node_id = srv.agent.neural_memory.remember(
+        content=body.get("content", ""),
+        node_type=body.get("node_type", "observation"),
+        reasoning=body.get("reasoning", ""),
+        importance=float(body.get("importance", 0.5)),
+    )
+    return {"node_id": node_id, "status": "stored"}
+
+
+@app.get("/pillars/memory/ask", tags=["agent"])
+async def ask_memory(q: str, request: Request, user: User = Depends(_require_user)):
+    """Query the agent's own memory. e.g. ?q=why did I choose X"""
+    srv: ServerState = request.app.state.srv
+    if not hasattr(srv.agent, "neural_memory") or not srv.agent.neural_memory:
+        raise HTTPException(503, "Neural memory not available")
+    answer = srv.agent.neural_memory.ask_self(q)
+    return {"question": q, "answer": answer}
+
+
+@app.post("/pillars/memory/consolidate", tags=["agent"])
+async def consolidate_memory(request: Request, user: User = Depends(_require_user)):
+    """Compress old low-importance memories."""
+    srv: ServerState = request.app.state.srv
+    if not hasattr(srv.agent, "neural_memory") or not srv.agent.neural_memory:
+        raise HTTPException(503, "Neural memory not available")
+    result = srv.agent.neural_memory.consolidate()
+    return result
+
+
+@app.get("/pillars/learning", tags=["agent"])
+async def get_learning_stats(request: Request, user: User = Depends(_require_user)):
+    """Learning Engine stats: feedback, tool reliability, FAQ count."""
+    srv: ServerState = request.app.state.srv
+    if not hasattr(srv.agent, "learning") or not srv.agent.learning:
+        raise HTTPException(503, "Learning engine not available")
+    return srv.agent.learning.get_stats()
+
+
+@app.post("/pillars/feedback", tags=["agent"])
+async def record_feedback(request: Request, user: User = Depends(_require_user)):
+    """Record user feedback on an interaction. Body: {interaction_id, score, reason}"""
+    body = await request.json()
+    srv: ServerState = request.app.state.srv
+    if not hasattr(srv.agent, "learning") or not srv.agent.learning:
+        raise HTTPException(503, "Learning engine not available")
+    srv.agent.learning.record_feedback(
+        interaction_id=body.get("interaction_id", ""),
+        score=int(body.get("score", 0)),
+        reason=body.get("reason", ""),
+    )
+    return {"status": "recorded"}
+
+
+# ─────────────────────────────────────────────
 #  Static Files
 # ─────────────────────────────────────────────
 @app.get("/", include_in_schema=False)
