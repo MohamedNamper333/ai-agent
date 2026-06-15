@@ -54,7 +54,7 @@ class LLMConfig:
 
     # Ollama (local, free)
     ollama_url: str = "http://localhost:11434"
-    ollama_model: str = "qwen3:8b"
+    ollama_model: str = "qwen2.5:7b"
     ollama_enabled: bool = True
 
     # OpenCode Zen (cloud, free)
@@ -63,9 +63,9 @@ class LLMConfig:
     opencode_zen_enabled: bool = True
 
     # Model routing per level
-    simple_model: str = "qwen3:8b"
-    moderate_model: str = "deepseek-v4-flash-free"
-    deep_model: str = "big-pickle"
+    simple_model: str = "phi3.5:mini"
+    moderate_model: str = "qwen2.5:7b"
+    deep_model: str = "deepseek-r1:7b"
 
     # Behaviour
     auto_route: bool = True
