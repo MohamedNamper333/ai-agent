@@ -171,12 +171,18 @@ class LLMRouter:
             if m == self.config.ollama_model.lower():
                 return self.ollama
 
+        # OpenCodeZen is PRIMARY for all levels.
+        # Ollama (local) is FALLBACK only when OpenCodeZen is unavailable.
         if request.level == ReasoningLevel.SIMPLE:
             try:
-                return self.ollama
+                return self.zen   # fast model (deepseek-v4-flash-free)
             except ProviderUnavailable:
-                return self.zen
-        return self.zen
+                return self.ollama
+        # MODERATE / DEEP → always OpenCodeZen (big-pickle or deepseek)
+        try:
+            return self.zen
+        except ProviderUnavailable:
+            return self.ollama
 
     def _fallback_provider(self, failed: BaseLLM) -> Optional[BaseLLM]:
         if failed.provider_name == "ollama":

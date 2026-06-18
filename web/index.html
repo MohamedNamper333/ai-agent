@@ -312,8 +312,82 @@
             </div>
           </div>
           <div class="chat-input-meta">
+            <!-- Model Selector -->
+            <div class="model-selector-wrap" id="model-selector-wrap">
+              <button class="model-selector-btn" id="model-selector-btn" aria-haspopup="listbox" aria-expanded="false">
+                <span class="model-dot" id="model-dot"></span>
+                <span class="model-selector-label" id="model-selector-label">deepseek-v4-flash</span>
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" class="model-chevron" aria-hidden="true">
+                  <path d="M2 4l3-3 3 3M2 7l3-3 3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+
+              <!-- Dropdown — opens ABOVE -->
+              <div class="model-dropdown" id="model-dropdown" role="listbox" aria-label="Select model" style="display:none">
+                <div class="model-dropdown-section-label">
+                  <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5"/><path d="M8 5v4M8 11v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                  OpenCodeZen — Free Cloud
+                </div>
+                <button class="model-option" role="option" data-model="deepseek-v4-flash-free" data-provider="opencode_zen" data-label="DeepSeek V4 Flash">
+                  <span class="model-option-check" aria-hidden="true">✓</span>
+                  <div class="model-option-body">
+                    <span class="model-option-name">DeepSeek V4 Flash</span>
+                    <span class="model-option-desc">Fast reasoning · Best for most tasks</span>
+                  </div>
+                  <span class="model-badge badge-fast">Fast</span>
+                </button>
+                <button class="model-option" role="option" data-model="big-pickle" data-provider="opencode_zen" data-label="Big Pickle">
+                  <span class="model-option-check" aria-hidden="true">✓</span>
+                  <div class="model-option-body">
+                    <span class="model-option-name">Big Pickle</span>
+                    <span class="model-option-desc">Deep analysis · Complex tasks</span>
+                  </div>
+                  <span class="model-badge badge-deep">Deep</span>
+                </button>
+                <button class="model-option" role="option" data-model="minimax-m3-free" data-provider="opencode_zen" data-label="MiniMax M3">
+                  <span class="model-option-check" aria-hidden="true">✓</span>
+                  <div class="model-option-body">
+                    <span class="model-option-name">MiniMax M3</span>
+                    <span class="model-option-desc">Balanced · Multilingual</span>
+                  </div>
+                  <span class="model-badge badge-balanced">Balanced</span>
+                </button>
+                <button class="model-option" role="option" data-model="nemotron-3-ultra-free" data-provider="opencode_zen" data-label="Nemotron Ultra">
+                  <span class="model-option-check" aria-hidden="true">✓</span>
+                  <div class="model-option-body">
+                    <span class="model-option-name">Nemotron 3 Ultra</span>
+                    <span class="model-option-desc">NVIDIA · Strong STEM</span>
+                  </div>
+                  <span class="model-badge badge-stem">STEM</span>
+                </button>
+                <button class="model-option" role="option" data-model="miimo-v2.5-free" data-provider="opencode_zen" data-label="Miimo v2.5">
+                  <span class="model-option-check" aria-hidden="true">✓</span>
+                  <div class="model-option-body">
+                    <span class="model-option-name">Miimo v2.5</span>
+                    <span class="model-option-desc">Lightweight · Quick replies</span>
+                  </div>
+                  <span class="model-badge badge-light">Light</span>
+                </button>
+
+                <div class="model-dropdown-divider"></div>
+
+                <div class="model-dropdown-section-label">
+                  <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="9" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M5 13h6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+                  Local — Emergency
+                </div>
+                <button class="model-option" role="option" data-model="qwen3:8b" data-provider="ollama" data-label="Qwen3:8b">
+                  <span class="model-option-check" aria-hidden="true">✓</span>
+                  <div class="model-option-body">
+                    <span class="model-option-name">Qwen3:8b</span>
+                    <span class="model-option-desc">Local · Offline · Slow on GTX 1660</span>
+                  </div>
+                  <span class="model-badge badge-local">Local</span>
+                </button>
+              </div>
+            </div>
+
             <span class="chat-char-counter" id="chat-char-counter"></span>
-            <span class="chat-hint">AI Agent can make mistakes — verify important info</span>
+            <span class="chat-hint">AI Agent — verify important info</span>
           </div>
         </div>
       </div>

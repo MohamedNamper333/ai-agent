@@ -77,6 +77,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initCmdPalette();
   initSettings();
   initSwipeGesture();
+  initModelSelector();
   loadConversations();
   switchView('dashboard');
 });
@@ -820,3 +821,130 @@ function scrollBottom(force) { if (!messagesEl) return; const nearBottom = messa
 function setStatus(text, isError) { if (!statusText) return; statusText.textContent = text; const dot = qs('.status-dot'); if (dot) dot.style.background = isError ? '#ef4444' : '#22c55e'; }
 let _toastTimer;
 function showToast(msg, duration = 2400) { const el = $('toast'); if (!el) return; el.textContent = msg; el.classList.remove('hidden'); clearTimeout(_toastTimer); _toastTimer = setTimeout(() => el.classList.add('hidden'), duration); }
+
+/* ══════════════════════════════
+   MODEL SELECTOR
+══════════════════════════════ */
+
+const MODELS_CONFIG = [
+  { id: 'deepseek-v4-flash-free', provider: 'opencode_zen', label: 'DeepSeek V4 Flash', isLocal: false },
+  { id: 'big-pickle',             provider: 'opencode_zen', label: 'Big Pickle',         isLocal: false },
+  { id: 'minimax-m3-free',        provider: 'opencode_zen', label: 'MiniMax M3',          isLocal: false },
+  { id: 'nemotron-3-ultra-free',  provider: 'opencode_zen', label: 'Nemotron Ultra',      isLocal: false },
+  { id: 'miimo-v2.5-free',        provider: 'opencode_zen', label: 'Miimo v2.5',          isLocal: false },
+  { id: 'qwen3:8b',               provider: 'ollama',        label: 'Qwen3:8b',            isLocal: true  },
+];
+
+let _activeModel = localStorage.getItem('ai_active_model') || 'deepseek-v4-flash-free';
+let _activeProvider = localStorage.getItem('ai_active_provider') || 'opencode_zen';
+let _dropdownOpen = false;
+
+function initModelSelector() {
+  const btn = $('model-selector-btn');
+  const dropdown = $('model-dropdown');
+  if (!btn || !dropdown) return;
+
+  _renderActiveModel();
+  _markActiveOption();
+
+  // Toggle dropdown
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    _dropdownOpen ? _closeModelDropdown() : _openModelDropdown();
+  });
+
+  // Close on outside click
+  document.addEventListener('click', (e) => {
+    if (_dropdownOpen && !$('model-selector-wrap')?.contains(e.target)) {
+      _closeModelDropdown();
+    }
+  });
+
+  // Close on Escape
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && _dropdownOpen) _closeModelDropdown();
+  });
+
+  // Handle option clicks
+  dropdown.querySelectorAll('.model-option').forEach(opt => {
+    opt.addEventListener('click', () => _selectModel(
+      opt.dataset.model,
+      opt.dataset.provider,
+      opt.dataset.label
+    ));
+  });
+}
+
+function _openModelDropdown() {
+  const btn = $('model-selector-btn');
+  const dropdown = $('model-dropdown');
+  if (!dropdown) return;
+  dropdown.style.display = '';
+  btn?.setAttribute('aria-expanded', 'true');
+  _dropdownOpen = true;
+}
+
+function _closeModelDropdown() {
+  const btn = $('model-selector-btn');
+  const dropdown = $('model-dropdown');
+  if (!dropdown) return;
+  dropdown.style.display = 'none';
+  btn?.setAttribute('aria-expanded', 'false');
+  _dropdownOpen = false;
+}
+
+function _renderActiveModel() {
+  const label = $('model-selector-label');
+  const dot = $('model-dot');
+  const cfg = MODELS_CONFIG.find(m => m.id === _activeModel);
+  const displayName = cfg ? cfg.label : _activeModel;
+
+  if (label) label.textContent = displayName;
+  if (dot) {
+    dot.className = 'model-dot' + (cfg?.isLocal ? ' local' : '');
+    dot.title = cfg?.isLocal ? 'Local model' : 'Cloud model';
+  }
+}
+
+function _markActiveOption() {
+  document.querySelectorAll('.model-option').forEach(opt => {
+    opt.classList.toggle('active', opt.dataset.model === _activeModel);
+  });
+}
+
+async function _selectModel(modelId, provider, label) {
+  if (modelId === _activeModel) { _closeModelDropdown(); return; }
+
+  const btn = $('model-selector-btn');
+  btn?.classList.add('loading');
+  _closeModelDropdown();
+
+  try {
+    const r = await fetch(`${API_BASE}/models/switch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model_id: modelId, provider }),
+    });
+
+    if (r.ok) {
+      _activeModel = modelId;
+      _activeProvider = provider;
+      localStorage.setItem('ai_active_model', modelId);
+      localStorage.setItem('ai_active_provider', provider);
+      _renderActiveModel();
+      _markActiveOption();
+      showToast(`Model: ${label}`);
+    } else {
+      const err = await r.json().catch(() => ({}));
+      showToast(`Switch failed: ${err.detail || r.status}`, 3500);
+    }
+  } catch (e) {
+    showToast('Could not reach server', 3000);
+  } finally {
+    btn?.classList.remove('loading');
+  }
+}
+
+function getActiveModel() {
+  return { model_id: _activeModel, provider: _activeProvider };
+}
