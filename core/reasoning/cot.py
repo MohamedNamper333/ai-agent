@@ -38,6 +38,7 @@ class ReasoningStep:
     confidence: float
 
     def is_high_confidence(self) -> bool:
+        """Is high confidence."""
         return self.confidence >= CONFIDENCE_THRESHOLD
 
 
@@ -56,15 +57,18 @@ class ReasoningChain:
 
     @property
     def step_count(self) -> int:
+        """Step count."""
         return len(self.steps)
 
     @property
     def avg_confidence(self) -> float:
+        """Avg confidence."""
         if not self.steps:
             return 0.0
         return sum(s.confidence for s in self.steps) / len(self.steps)
 
     def to_dict(self) -> dict[str, Any]:
+        """Return a plain dict representation of this object."""
         return {
             "query": self.query,
             "steps": [
@@ -217,10 +221,13 @@ class CoTEngine:
         )
 
     def think_simple(self, query: str) -> str:
+        """Think simple."""
         return self.think(query, level=ReasoningLevel.SIMPLE).final_answer
 
     def think_moderate(self, query: str) -> str:
+        """Think moderate."""
         return self.think(query, level=ReasoningLevel.MODERATE).final_answer
 
     def think_deep(self, query: str) -> str:
+        """Think deep."""
         return self.think(query, level=ReasoningLevel.DEEP).final_answer

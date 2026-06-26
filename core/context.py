@@ -18,6 +18,7 @@ class ContextManager:
         tool_descriptions: str = "",
         system_prompt: Optional[str] = None,
     ) -> str:
+        """Assemble the full LLM prompt from system, history, tools, and user input."""
         sp = system_prompt if system_prompt is not None else self.system_prompt
 
         parts = []
@@ -45,6 +46,7 @@ class ContextManager:
         history: str = "",
         tool_descriptions: str = "",
     ) -> str:
+        """Build a prompt that includes tool execution results."""
         sp = self.system_prompt
 
         parts = []
@@ -75,6 +77,7 @@ class ContextManager:
         tool_descriptions: str = "",
         history: str = "",
     ) -> str:
+        """Build a planning prompt asking the LLM to return a JSON execution plan."""
         sp = self.system_prompt
 
         parts = []
@@ -102,12 +105,14 @@ class ContextManager:
         return "".join(parts)
 
     def count_tokens(self, text: str, model) -> int:
+        """Return the estimated token count for the given text."""
         try:
             return model.count_tokens(text)
         except Exception:
             return len(text) // 4
 
     def get_stats(self) -> dict:
+        """Return hit rate, miss count, eviction count, and current size."""
         return {
             "max_tokens": self.max_tokens,
             "system_prompt_length": len(self.system_prompt),

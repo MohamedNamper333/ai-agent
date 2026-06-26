@@ -60,6 +60,7 @@ class Plan:
         )
 
     def to_summary(self) -> str:
+        """To summary."""
         return (
             f"Plan {self.plan_id}: {self.description[:80]}\n"
             f"  Score: {self.composite_score:.2f} | "
@@ -85,6 +86,7 @@ class DeductiveResult:
     improvement_hint: str = ""
 
     def to_report(self) -> str:
+        """To report."""
         lines = [
             "═" * 60,
             "DEDUCTIVE REASONING REPORT",
@@ -366,6 +368,7 @@ If no: respond exactly "OPTIMAL"
         return "[LLM unavailable]"
 
     def get_decision_log(self) -> list[dict]:
+        """Get decision log."""
         return [
             {
                 "problem": r.problem[:100],

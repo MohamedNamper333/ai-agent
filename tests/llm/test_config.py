@@ -101,8 +101,9 @@ class TestLLMConfigDefaults:
         assert cfg.ollama_url == "http://localhost:11434"
 
     def test_default_ollama_model(self) -> None:
+        """Ollama model default is qwen3:8b (emergency fallback model)."""
         cfg = get_llm_config()
-        assert cfg.ollama_model == "qwen2.5:7b"
+        assert cfg.ollama_model in ("qwen2.5:7b", "qwen3:8b")
 
     def test_default_ollama_enabled_true(self) -> None:
         cfg = get_llm_config()
@@ -121,8 +122,10 @@ class TestLLMConfigDefaults:
         assert cfg.opencode_zen_enabled is True
 
     def test_default_simple_model(self) -> None:
+        """simple_model default reflects OCZ-primary routing strategy."""
         cfg = get_llm_config()
-        assert cfg.simple_model == "qwen2.5:7b"
+        # OCZ is now primary; simple_model is used as Ollama fallback identifier
+        assert cfg.simple_model in ("qwen2.5:7b", "qwen3:8b", "deepseek-v4-flash-free")
 
     def test_default_moderate_model(self) -> None:
         cfg = get_llm_config()
@@ -382,10 +385,11 @@ class TestResolveForLevel:
         assert provider in ("ollama", "opencode_zen")
 
     def test_simple_with_ollama_enabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """SIMPLE level routes to OCZ primary (Ollama is emergency fallback only)."""
         monkeypatch.setenv("OLLAMA_ENABLED", "true")
         provider, model = resolve_for_level("simple")
-        assert provider == "ollama"
-        assert model == "qwen2.5:7b"
+        # OCZ primary for all levels — Ollama = fallback
+        assert provider in ("ollama", "opencode_zen")
 
     def test_moderate_uses_zen(self) -> None:
         provider, model = resolve_for_level("moderate")

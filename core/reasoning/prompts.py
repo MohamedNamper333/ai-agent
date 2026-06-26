@@ -115,4 +115,5 @@ class CoTPrompts:
 
     @classmethod
     def build_system_message(cls) -> str:
+        """Build system message."""
         return cls.SYSTEM_BASE

@@ -69,6 +69,7 @@ class DataAnalysis:
 
     @staticmethod
     def analyze_csv(file_path: str, max_rows: int = 50) -> str:
+        """Read a CSV file and return column statistics and a row preview."""
         if not os.path.exists(file_path):
             return f"Error: File not found: {file_path}"
         try:
@@ -107,6 +108,7 @@ class DataAnalysis:
 
     @staticmethod
     def analyze_json(file_path: str) -> str:
+        """Read a JSON file and return structure analysis and field statistics."""
         if not os.path.exists(file_path):
             return f"Error: File not found: {file_path}"
         try:
@@ -148,6 +150,7 @@ class DataAnalysis:
 
     @staticmethod
     def analyze_text(file_path: str) -> str:
+        """Read a text file and return character, word, and sentence statistics."""
         if not os.path.exists(file_path):
             return f"Error: File not found: {file_path}"
         try:
@@ -171,6 +174,7 @@ class DataAnalysis:
 
     @staticmethod
     def analyze_excel(file_path: str, sheet: Optional[str] = None) -> str:
+        """Read an Excel file and return sheet structure and column statistics."""
         if not os.path.exists(file_path):
             return f"Error: File not found: {file_path}"
         try:
@@ -218,6 +222,7 @@ class DataAnalysis:
 
     @staticmethod
     def stats_summary(data_json: str) -> str:
+        """Compute descriptive statistics for a JSON array of numbers."""
         try:
             data = json.loads(data_json)
         except (json.JSONDecodeError, TypeError):
@@ -258,6 +263,7 @@ class DataAnalysis:
 
     @staticmethod
     def sql_query(file_path: str, query: str) -> str:
+        """Run a SQL query against CSV or JSON data in an in-memory SQLite DB."""
         if not os.path.exists(file_path):
             return f"Error: File not found: {file_path}"
         try:
@@ -314,6 +320,7 @@ class DataAnalysis:
 
     @staticmethod
     def analyze_data_quality(file_path: str) -> str:
+        """Return a data quality report with missing values and duplicate counts."""
         if not os.path.exists(file_path):
             return f"Error: File not found: {file_path}"
         try:
@@ -349,6 +356,7 @@ class DataAnalysis:
 
     @staticmethod
     def correlation_analysis(file_path: str, columns: Optional[str] = None) -> str:
+        """Compute and return the Pearson correlation matrix for numeric columns."""
         if not os.path.exists(file_path):
             return f"Error: File not found: {file_path}"
         try:
@@ -395,6 +403,7 @@ class DataAnalysis:
 
     @staticmethod
     def generate_visualization(file_path: str, chart_type: str = "bar", column: Optional[str] = None) -> str:
+        """Return a visualization specification string for the given data file."""
         if not os.path.exists(file_path):
             return f"Error: File not found: {file_path}"
         try:
@@ -425,6 +434,7 @@ class DataAnalysis:
         date_column: Optional[str] = None,
         value_column: Optional[str] = None,
     ) -> str:
+        """Analyze a time-indexed dataset and return trend information."""
         if not os.path.exists(file_path):
             return f"Error: File not found: {file_path}"
         try:

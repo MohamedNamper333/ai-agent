@@ -54,6 +54,7 @@ class CodeMetrics:
         return max(0.0, s)
 
     def summary(self) -> str:
+        """Summary."""
         return (
             f"Lines: {self.total_lines} (code={self.code_lines}, "
             f"comments={self.comment_lines}, blank={self.blank_lines})\n"
@@ -88,6 +89,7 @@ class OptimizationResult:
     time_ms: float
 
     def report(self) -> str:
+        """Return a session summary with event counts, durations, and error list."""
         lines = [
             "═" * 60,
             "CODE OPTIMIZATION REPORT",
@@ -246,6 +248,7 @@ class CodeOptimizer:
         """Compute maximum nesting depth."""
         max_d = [0]
         def visit(node, depth):
+            """Visit."""
             max_d[0] = max(max_d[0], depth)
             for child in ast.iter_child_nodes(node):
                 if isinstance(child, (ast.For, ast.While, ast.If, ast.With,
@@ -445,6 +448,7 @@ class CodeOptimizer:
         )
         changes = []
         def replace_block(m):
+            """Replace block."""
             block = m.group(1)
             lines_in_block = [
                 l.strip()[7:-2] if l.strip().startswith('print("') else l.strip()[7:-2]
@@ -490,6 +494,7 @@ class CodeOptimizer:
         )
         changes = []
         def replace(m):
+            """Replace."""
             changes.append("Simplified boolean return (if x: return True else: return False → return x)")
             return f"{m.group(1)}return {m.group(2)}"
         result = pattern.sub(replace, code)

@@ -72,6 +72,7 @@ class OpenCodeZenProvider(BaseLLM):
         return self._client
 
     def is_available(self) -> bool:
+        """Return True if Docker is installed and the daemon is running."""
         if not self.api_key:
             return False
         try:
@@ -93,6 +94,7 @@ class OpenCodeZenProvider(BaseLLM):
         return msgs
 
     def generate(self, request: LLMRequest) -> LLMResponse:
+        """Generate."""
         client = self._get_client()
         model_id = self._resolve_model_id()
         self._record_call()
@@ -142,6 +144,7 @@ class OpenCodeZenProvider(BaseLLM):
         )
 
     def stream(self, request: LLMRequest) -> Iterator[str]:
+        """Stream."""
         client = self._get_client()
         model_id = self._resolve_model_id()
         self._record_call()
@@ -178,6 +181,7 @@ class OpenCodeZenProvider(BaseLLM):
             ) from e
 
     def get_stats(self) -> dict[str, Any]:
+        """Return hit rate, miss count, eviction count, and current size."""
         base = super().get_stats()
         base["base_url"] = self.base_url
         base["available"] = self.is_available()

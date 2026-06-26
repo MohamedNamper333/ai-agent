@@ -31,6 +31,7 @@ class ModelInfo:
 
     @property
     def label(self) -> str:
+        """Label."""
         tag = "🖥 Local" if self.is_local else "☁ Cloud"
         free = " (Free)" if self.is_free else ""
         return f"{tag} | {self.display_name}{free}"
@@ -249,6 +250,7 @@ class ModelSelector:
 _selector: Optional[ModelSelector] = None
 
 def get_model_selector() -> ModelSelector:
+    """Get model selector."""
     global _selector
     if _selector is None:
         _selector = ModelSelector()

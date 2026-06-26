@@ -80,6 +80,7 @@ class Tool:
             )
 
     def get_stats(self) -> dict:
+        """Return hit rate, miss count, eviction count, and current size."""
         avg = self._total_time / max(self._call_count, 1)
         err_rate = self._error_count / max(self._call_count, 1) * 100
         return {

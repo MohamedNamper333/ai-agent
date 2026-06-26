@@ -71,6 +71,7 @@ class ToolRegistry:
             self._enabled = set(self._tools.keys())
 
     def enable_tool(self, name: str) -> bool:
+        """Enable a tool by name so it can be called by the agent."""
         if name in self._tools:
             self._enabled.add(name)
             self._invalidate_cache()
@@ -78,6 +79,7 @@ class ToolRegistry:
         return False
 
     def disable_tool(self, name: str) -> bool:
+        """Disable a tool by name to prevent it from being called."""
         if name in self._tools:
             self._enabled.discard(name)
             self._invalidate_cache()
@@ -85,6 +87,7 @@ class ToolRegistry:
         return False
 
     def enable_category(self, category: str) -> int:
+        """Enable all tools belonging to the given category."""
         count = 0
         for tool in self._tools.values():
             if tool.category == category:
@@ -95,6 +98,7 @@ class ToolRegistry:
         return count
 
     def disable_category(self, category: str) -> int:
+        """Disable all tools belonging to the given category."""
         count = 0
         for tool in self._tools.values():
             if tool.category == category:
@@ -105,23 +109,29 @@ class ToolRegistry:
         return count
 
     def is_enabled(self, name: str) -> bool:
+        """Return True if the named tool is currently enabled."""
         return name in self._enabled
 
     def get_enabled_count(self) -> int:
+        """Return the total number of currently enabled tools."""
         self._ensure_all()
         return len(self._enabled)
 
     def get_disabled_count(self) -> int:
+        """Return the total number of currently disabled tools."""
         return self.total_count() - len(self._enabled)
 
     def total_count(self) -> int:
+        """Return the total number of registered tools (enabled and disabled)."""
         self._ensure_all()
         return len(self._tools)
 
     def get_enabled_tools(self) -> list[Tool]:
+        """Return a list of all currently enabled Tool objects."""
         return [t for t in self._tools.values() if t.name in self._enabled]
 
     def get_disabled_tools(self) -> list[Tool]:
+        """Return a list of all currently disabled Tool objects."""
         return [t for t in self._tools.values() if t.name not in self._enabled]
 
     def _register_defaults(self):
@@ -803,17 +813,20 @@ class ToolRegistry:
         self._format_prompt_cache = None
 
     def register(self, tool: Tool) -> None:
+        """Register a new Tool into the registry and mark it as enabled."""
         self._tools[tool.name] = tool
         self._enabled.add(tool.name)
         self._invalidate_cache()
 
     def get(self, name: str) -> Tool | None:
+        """Return the Tool with the given name, loading its category if needed."""
         for cat in list(self._lazy_loaders.keys()):
             if cat not in self._loaded_categories:
                 self._ensure_category(cat)
         return self._tools.get(name)
 
     def list_tools(self) -> list[Tool]:
+        """Return a list of all enabled Tool objects (cached)."""
         if self._list_cache is not None:
             return self._list_cache
         self._ensure_all()
@@ -822,10 +835,12 @@ class ToolRegistry:
         return result
 
     def list_all_tools(self) -> list[Tool]:
+        """Return a list of every registered Tool regardless of enabled state."""
         self._ensure_all()
         return list(self._tools.values())
 
     def list_tools_by_category(self) -> dict[str, list[Tool]]:
+        """Return a dict mapping category names to their enabled tools."""
         self._ensure_all()
         categories = {}
         for tool in self._tools.values():
@@ -838,6 +853,7 @@ class ToolRegistry:
         return categories
 
     def list_tools_by_category_all(self) -> dict[str, list[Tool]]:
+        """Return a dict mapping category names to all tools."""
         self._ensure_all()
         categories = {}
         for tool in self._tools.values():
@@ -853,6 +869,7 @@ class ToolRegistry:
                 self._ensure_category(cat)
 
     def format_for_prompt(self) -> str:
+        """Return a markdown string describing available tools for the LLM prompt."""
         if self._format_prompt_cache is not None:
             return self._format_prompt_cache
         if not self._tools:
@@ -897,6 +914,7 @@ class ToolRegistry:
         return result
 
     def parse_and_execute(self, text: str) -> tuple[list[dict], list[dict]]:
+        """Parse tool call markup from LLM output and execute matched tools."""
         calls = []
         results = []
 
@@ -999,14 +1017,17 @@ class ToolRegistry:
         return calls
 
     def contains_tool_call(self, text: str) -> bool:
+        """Return True if the text contains a recognizable tool call pattern."""
         if '"tool_calls"' in text and '"name"' in text:
             return True
         return '<tool name="' in text and "</tool>" in text
 
     async def execute_parallel(self, tool_calls: list[dict]) -> list[ToolResult]:
+        """Execute parallel."""
         results = []
 
         async def run_single(call: dict) -> ToolResult:
+            """Run single."""
             tool = self.get(call["name"])
             if not tool:
                 return ToolResult(
@@ -1037,12 +1058,14 @@ class ToolRegistry:
         return final_results
 
     def get_tool_stats(self) -> list[dict]:
+        """Return per-tool usage statistics sorted by call count descending."""
         stats = []
         for tool in self._tools.values():
             stats.append(tool.get_stats())
         return sorted(stats, key=lambda x: x["calls"], reverse=True)
 
     def get_registry_stats(self) -> dict:
+        """Return aggregate statistics for the entire tool registry."""
         total_calls = sum(t._call_count for t in self._tools.values())
         total_errors = sum(t._error_count for t in self._tools.values())
         return {

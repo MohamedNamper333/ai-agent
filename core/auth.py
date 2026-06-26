@@ -28,6 +28,7 @@ class User:
     is_active: bool = True
 
     def to_dict(self) -> dict:
+        """Return a plain dict representation of this object."""
         return {
             "user_id": self.user_id,
             "username": self.username,
@@ -40,6 +41,7 @@ class User:
 
     @classmethod
     def from_dict(cls, data: dict) -> "User":
+        """Construct an instance from a plain dict."""
         return cls(
             user_id=data["user_id"],
             username=data["username"],
@@ -60,6 +62,7 @@ class AuthManager:
         self._loaded = False
 
     def load(self):
+        """Load data from storage."""
         if self._loaded:
             return
         if os.path.exists(self.db_path):
@@ -86,6 +89,7 @@ class AuthManager:
             print(f"[auth] Warning: save failed: {e}")
 
     def create_user(self, username: str, role: UserRole = UserRole.BASIC) -> User:
+        """Create and persist a new user with the given username and role."""
         user_id = f"user_{secrets.token_hex(8)}"
         api_key = f"sk_{secrets.token_hex(32)}"
         
@@ -104,6 +108,7 @@ class AuthManager:
         return user
 
     def get_user_by_api_key(self, api_key: str) -> Optional[User]:
+        """Return the User associated with the given API key, or None."""
         user_id = self._api_keys.get(api_key)
         if user_id:
             user = self._users.get(user_id)
@@ -113,9 +118,11 @@ class AuthManager:
         return None
 
     def get_user_by_id(self, user_id: str) -> Optional[User]:
+        """Return the User with the given ID, or None if not found."""
         return self._users.get(user_id)
 
     def create_session_token(self, user_id: str) -> str:
+        """Generate and store a 24-hour session token for the user."""
         token = secrets.token_hex(32)
         self._session_tokens[token] = {
             "user_id": user_id,
@@ -125,6 +132,7 @@ class AuthManager:
         return token
 
     def validate_session_token(self, token: str) -> Optional[User]:
+        """Return the User for a valid unexpired session token, or None."""
         session = self._session_tokens.get(token)
         if session:
             if time.time() < session["expires_at"]:
@@ -134,9 +142,11 @@ class AuthManager:
         return None
 
     def revoke_session(self, token: str):
+        """Invalidate and remove the given session token immediately."""
         self._session_tokens.pop(token, None)
 
     def update_role(self, user_id: str, new_role: UserRole) -> bool:
+        """Change the role of the user with the given ID. Return True on success."""
         user = self._users.get(user_id)
         if user:
             user.role = new_role
@@ -145,6 +155,7 @@ class AuthManager:
         return False
 
     def deactivate_user(self, user_id: str) -> bool:
+        """Mark a user as inactive so they cannot authenticate."""
         user = self._users.get(user_id)
         if user:
             user.is_active = False
@@ -153,12 +164,15 @@ class AuthManager:
         return False
 
     def list_users(self) -> list[dict]:
+        """Return a list of all users as plain dicts."""
         return [user.to_dict() for user in self._users.values()]
 
     def get_user_count(self) -> int:
+        """Get user count."""
         return len(self._users)
 
     def create_default_admin(self) -> Optional[User]:
+        """Create an admin user if none exists. Return the User or None."""
         admin_exists = any(
             u.role == UserRole.ADMIN for u in self._users.values()
         )
@@ -171,6 +185,7 @@ _auth_manager: Optional[AuthManager] = None
 
 
 def get_auth_manager() -> AuthManager:
+    """Return the global singleton AuthManager, creating it if needed."""
     global _auth_manager
     if _auth_manager is None:
         _auth_manager = AuthManager()

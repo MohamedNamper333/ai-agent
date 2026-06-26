@@ -16,6 +16,7 @@ class Message:
         self.timestamp = timestamp or datetime.now().isoformat()
 
     def to_dict(self) -> dict:
+        """Return a plain dict representation of this object."""
         return {
             "role": self.role,
             "content": self.content,
@@ -24,6 +25,7 @@ class Message:
 
     @classmethod
     def from_dict(cls, data: dict) -> "Message":
+        """Construct an instance from a plain dict."""
         return cls(
             role=data["role"],
             content=data["content"],
@@ -31,6 +33,7 @@ class Message:
         )
 
     def get_tokens_estimate(self) -> int:
+        """Return an approximate token count for this message content."""
         return max(1, len(self.content) // 4)
 
 
@@ -48,12 +51,14 @@ class ConversationMemory:
         return str(Path(config.BASE_DIR) / self.db_path)
 
     def new_conversation(self, conversation_id: str = "") -> str:
+        """Start a new conversation and return its ID."""
         cid = conversation_id or datetime.now().strftime("conv_%Y%m%d_%H%M%S")
         self.conversations[cid] = []
         self.current_id = cid
         return cid
 
     def add_message(self, role: str, content: str) -> None:
+        """Append a message to the current conversation and trigger a lazy save."""
         if not self.current_id or self.current_id not in self.conversations:
             self.new_conversation()
         self.conversations[self.current_id].append(Message(role, content))
@@ -65,11 +70,13 @@ class ConversationMemory:
             self._dirty = False
 
     def get_history(self, conversation_id: str = "") -> list[dict]:
+        """Return the last N execution history entries."""
         cid = conversation_id or self.current_id
         msgs = self.conversations.get(cid, [])
         return [m.to_dict() for m in msgs]
 
     def get_trimmed_history(self, max_tokens: int = 0) -> list[dict]:
+        """Return messages trimmed to fit within the max-token budget."""
         mt = max_tokens or self.max_tokens
         msgs = list(self.conversations.get(self.current_id, []))
         total = sum(m.get_tokens_estimate() for m in msgs)
@@ -79,6 +86,7 @@ class ConversationMemory:
         return [m.to_dict() for m in msgs]
 
     def search(self, query: str, top_k: int = 5) -> list[dict]:
+        """Full-text search across all conversations and return scored results."""
         query_lower = query.lower()
         results = []
 
@@ -109,6 +117,7 @@ class ConversationMemory:
         return results[:top_k]
 
     def format_for_llm(self, system_prompt: str, include_system: bool = True) -> str:
+        """Build a prompt string with system/user/assistant tags for the LLM."""
         parts = []
         if include_system and system_prompt:
             parts.append(f"<|system|>\n{system_prompt}\n")
@@ -119,12 +128,15 @@ class ConversationMemory:
         return "".join(parts)
 
     def list_conversations(self) -> list[str]:
+        """Return a list of all conversation IDs."""
         return list(self.conversations.keys())
 
     def delete_conversation(self, conversation_id: str) -> bool:
+        """Delete the conversation with the given ID. Return True if found."""
         return self.conversations.pop(conversation_id, None) is not None
 
     def get_conversation_summary(self, conversation_id: str) -> str:
+        """Return a one-paragraph summary of the given conversation."""
         msgs = self.conversations.get(conversation_id, [])
         if not msgs:
             return "Empty conversation"
@@ -141,6 +153,7 @@ class ConversationMemory:
         )
 
     def get_stats(self) -> dict:
+        """Return hit rate, miss count, eviction count, and current size."""
         total_msgs = sum(len(msgs) for msgs in self.conversations.values())
         total_tokens = sum(
             m.get_tokens_estimate()
@@ -167,6 +180,7 @@ class ConversationMemory:
             print(f"[memory] Warning: save failed: {e}")
 
     def load(self) -> None:
+        """Load data from storage."""
         if self._loaded:
             return
         path = self._get_path()
@@ -187,12 +201,14 @@ class ConversationMemory:
         self._last_save_count = sum(len(msgs) for msgs in self.conversations.values())
 
     def save_if_dirty(self) -> None:
+        """Persist to disk only if unsaved changes exist."""
         if self._dirty:
             self._save()
             self._dirty = False
             self._last_save_count = sum(len(msgs) for msgs in self.conversations.values())
 
     def clear(self) -> None:
+        """Remove all entries from the cache."""
         self.conversations = {}
         self.current_id = ""
         path = self._get_path()

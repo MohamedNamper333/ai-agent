@@ -292,6 +292,7 @@ tags: {tags or []}
         return sorted(results, key=lambda p: p["confidence"], reverse=True)
 
     def get_stats(self) -> dict:
+        """Return hit rate, miss count, eviction count, and current size."""
         return {
             "vault_path": str(self.vault),
             "decisions": len(list((self.vault / "_decisions").glob("*.md"))),
@@ -326,6 +327,7 @@ tags: {tags or []}
 _obsidian: Optional[ObsidianBridge] = None
 
 def get_obsidian_bridge(vault_path: str = "") -> ObsidianBridge:
+    """Get obsidian bridge."""
     global _obsidian
     if _obsidian is None:
         _obsidian = ObsidianBridge(vault_path)

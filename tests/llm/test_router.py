@@ -228,12 +228,14 @@ class TestBuildRequest:
 
 class TestPickProvider:
     def test_simple_level_picks_ollama(self) -> None:
-        with patch("core.llm.ollama_provider.OllamaProvider") as MockOllama:
-            MockOllama.return_value = ollama = MagicMock()
+        """OCZ is now primary for ALL levels; Ollama = emergency fallback only."""
+        with patch("core.llm.opencode_zen_provider.OpenCodeZenProvider") as MockZen:
+            MockZen.return_value = zen = MagicMock()
             router = LLMRouter(_make_config())
             req = router._build_request("hi", level=ReasoningLevel.SIMPLE)
             provider = router._pick_provider(req)
-            assert provider is ollama
+            # SIMPLE → OCZ primary (design decision: OCZ primary, Ollama fallback)
+            assert provider is zen
 
     def test_moderate_level_picks_zen(self) -> None:
         with patch("core.llm.opencode_zen_provider.OpenCodeZenProvider") as MockZen:
@@ -374,15 +376,16 @@ class TestGenerate:
             assert chunks == ["a", "b", "c"]
 
     def test_fallback_on_error(self) -> None:
+        """OCZ primary fails → Ollama fallback."""
         with patch("core.llm.ollama_provider.OllamaProvider") as MockOllama, \
                 patch("core.llm.opencode_zen_provider.OpenCodeZenProvider") as MockZen:
-            MockOllama.return_value = ollama = MagicMock()
-            ollama.provider_name = "ollama"
-            ollama.generate.side_effect = LLMError("ollama failed")
-            MockZen.return_value = _make_mock_provider("opencode_zen", "from-zen")
+            MockZen.return_value = zen = MagicMock()
+            zen.provider_name = "opencode_zen"
+            zen.generate.side_effect = LLMError("zen failed")
+            MockOllama.return_value = _make_mock_provider("ollama", "from-ollama")
             router = LLMRouter(_make_config())
             result = router.generate("hi", level=ReasoningLevel.SIMPLE)
-            assert result == "from-zen"
+            assert result == "from-ollama"
             assert router._stats["fallbacks"] == 1
 
     def test_all_providers_failed_raises(self) -> None:
@@ -493,14 +496,15 @@ class TestStream:
             assert chunks == ["a", "b", "c"]
 
     def test_stream_falls_back(self) -> None:
+        """OCZ primary stream fails → Ollama fallback stream."""
         with patch("core.llm.ollama_provider.OllamaProvider") as MockOllama, \
                 patch("core.llm.opencode_zen_provider.OpenCodeZenProvider") as MockZen:
-            MockOllama.return_value = ollama = MagicMock()
-            ollama.provider_name = "ollama"
-            ollama.stream.side_effect = LLMError("ollama stream failed")
             MockZen.return_value = zen = MagicMock()
             zen.provider_name = "opencode_zen"
-            zen.stream.return_value = iter(["x", "y"])
+            zen.stream.side_effect = LLMError("zen stream failed")
+            MockOllama.return_value = ollama = MagicMock()
+            ollama.provider_name = "ollama"
+            ollama.stream.return_value = iter(["x", "y"])
             router = LLMRouter(_make_config())
             chunks = list(router.stream("hi", level=ReasoningLevel.SIMPLE))
             assert chunks == ["x", "y"]

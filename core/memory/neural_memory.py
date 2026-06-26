@@ -60,6 +60,7 @@ class MemoryNode:
         return min(1.0, base_decay + reinforcement) * self.importance
 
     def summary(self) -> str:
+        """Summary."""
         return (
             f"[{self.node_type.upper()}] {self.content[:100]}\n"
             f"  Why: {self.reasoning[:80]}\n"
@@ -328,6 +329,7 @@ class NeuralMemory:
     #  Stats
     # ─────────────────────────────────────────
     def get_stats(self) -> dict:
+        """Return hit rate, miss count, eviction count, and current size."""
         total = self._conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
         by_type = dict(
             self._conn.execute(
@@ -419,6 +421,7 @@ class NeuralMemory:
         return f"mem_{h}"
 
     def close(self) -> None:
+        """Flush remaining events and finalize the telemetry session."""
         if self._conn:
             self._conn.close()
 
@@ -427,6 +430,7 @@ class NeuralMemory:
 _neural_memory: Optional[NeuralMemory] = None
 
 def get_neural_memory() -> NeuralMemory:
+    """Get neural memory."""
     global _neural_memory
     if _neural_memory is None:
         _neural_memory = NeuralMemory()

@@ -63,7 +63,9 @@ def require_optional_import(module_name: str, package_name: str = None) -> Calla
         package_name = module_name
     
     def decorator(func: Callable) -> Callable:
+        """Decorator."""
         def wrapper(*args, **kwargs):
+            """Wrapper."""
             try:
                 return func(*args, **kwargs)
             except ImportError:
@@ -91,7 +93,9 @@ def retry_on_failure(max_retries: int = 3, backoff: float = 1.0) -> Callable:
     import time
     
     def decorator(func: Callable) -> Callable:
+        """Decorator."""
         def wrapper(*args, **kwargs):
+            """Wrapper."""
             last_exception = None
             for attempt in range(max_retries):
                 try:

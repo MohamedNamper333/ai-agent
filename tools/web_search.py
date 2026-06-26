@@ -7,6 +7,7 @@ from core.utils import strip_html
 class WebTools:
     @staticmethod
     def fetch_url(url: str, timeout: int = 30) -> str:
+        """Fetch a URL and return the extracted text content."""
         try:
             import requests
             parsed = urlparse(url)
@@ -37,6 +38,7 @@ class WebTools:
 
     @staticmethod
     def search_web(query: str, num_results: int = 5) -> str:
+        """Search DuckDuckGo and return the top results as formatted text."""
         try:
             import requests
 
@@ -100,6 +102,7 @@ class WebTools:
 
     @staticmethod
     def web_scrape(url: str, selector: str = "") -> str:
+        """Scrape a URL with an optional CSS selector and return the text."""
         try:
             import requests
             from urllib.parse import urlparse
@@ -150,6 +153,7 @@ class WebTools:
 
     @staticmethod
     def fetch_json(url: str) -> str:
+        """Fetch a URL and return the parsed JSON as a formatted string."""
         try:
             import requests
             from urllib.parse import urlparse
@@ -180,6 +184,7 @@ class WebTools:
 
     @staticmethod
     def rss_feed(url: str) -> str:
+        """Fetch and parse an RSS feed and return the item list."""
         try:
             import requests
             from xml.etree import ElementTree

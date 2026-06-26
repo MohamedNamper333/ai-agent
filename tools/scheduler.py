@@ -23,6 +23,7 @@ class TaskScheduler:
         self._history: list[dict] = []
 
     def load(self):
+        """Load data from storage."""
         if self._loaded:
             return
         if os.path.exists(self.db_path):
@@ -39,9 +40,11 @@ class TaskScheduler:
         self._loaded = True
 
     def set_callback(self, callback: Callable):
+        """Set the function to invoke when a scheduled task fires."""
         self._callback = callback
 
     def add_task(self, name: str, prompt: str, schedule: str, task_type: str = "interval") -> dict:
+        """Create and persist a new scheduled task. Return the task dict."""
         if task_type not in ("interval", "daily", "once"):
             return {"error": "task_type must be 'interval', 'daily', or 'once'"}
 
@@ -64,6 +67,7 @@ class TaskScheduler:
         return task
 
     def remove_task(self, task_id: str) -> bool:
+        """Delete the task with the given ID. Return True if found."""
         with self._lock:
             for i, t in enumerate(self.tasks):
                 if t["id"] == task_id:
@@ -73,6 +77,7 @@ class TaskScheduler:
         return False
 
     def enable_task(self, task_id: str) -> bool:
+        """Re-enable a previously disabled task. Return True on success."""
         with self._lock:
             for t in self.tasks:
                 if t["id"] == task_id:
@@ -82,6 +87,7 @@ class TaskScheduler:
         return False
 
     def disable_task(self, task_id: str) -> bool:
+        """Prevent a task from firing without deleting it. Return True on success."""
         with self._lock:
             for t in self.tasks:
                 if t["id"] == task_id:
@@ -91,11 +97,13 @@ class TaskScheduler:
         return False
 
     def list_tasks(self) -> list[dict]:
+        """Return a copy of all registered tasks."""
         self.load()
         with self._lock:
             return list(self.tasks)
 
     def get_task(self, task_id: str) -> Optional[dict]:
+        """Return a copy of the task with the given ID, or None."""
         self.load()
         with self._lock:
             for t in self.tasks:
@@ -104,9 +112,11 @@ class TaskScheduler:
         return None
 
     def get_history(self, limit: int = 20) -> list[dict]:
+        """Return the last N execution history entries."""
         return self._history[-limit:]
 
     def start(self):
+        """Start the background scheduling thread."""
         if self._running:
             return
         self._running = True
@@ -114,6 +124,7 @@ class TaskScheduler:
         self._thread.start()
 
     def stop(self):
+        """Stop the background scheduling thread."""
         self._running = False
 
     def _run_loop(self):

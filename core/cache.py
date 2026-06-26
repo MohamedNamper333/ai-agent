@@ -24,11 +24,13 @@ class CacheEntry:
             self.last_accessed = time.time()
 
     def is_expired(self) -> bool:
+        """Return True if this cache entry has passed its expiry time."""
         if self.expires_at <= 0:
             return False
         return time.time() > self.expires_at
 
     def touch(self):
+        """Update access count and last-accessed timestamp on this entry."""
         self.access_count += 1
         self.last_accessed = time.time()
 
@@ -46,6 +48,7 @@ class LRUCache:
         }
 
     def get(self, key: str) -> Optional[Any]:
+        """Return the Tool with the given name, loading its category if needed."""
         with self._lock:
             entry = self._cache.get(key)
             if entry is None:
@@ -63,6 +66,7 @@ class LRUCache:
             return entry.value
 
     def set(self, key: str, value: Any, ttl: int = None):
+        """Set."""
         ttl = ttl or self.default_ttl
         
         with self._lock:
@@ -80,6 +84,7 @@ class LRUCache:
             self._cache[key] = entry
 
     def delete(self, key: str) -> bool:
+        """Remove the entry with the given key. Return True if it existed."""
         with self._lock:
             if key in self._cache:
                 del self._cache[key]
@@ -87,10 +92,12 @@ class LRUCache:
             return False
 
     def clear(self):
+        """Remove all entries from the cache."""
         with self._lock:
             self._cache.clear()
 
     def cleanup_expired(self):
+        """Evict all entries that have passed their expiry time."""
         with self._lock:
             expired_keys = [
                 key for key, entry in self._cache.items()
@@ -105,6 +112,7 @@ class LRUCache:
         factory: Callable, 
         ttl: int = None
     ) -> Any:
+        """Return the cached value or call factory, cache it, and return its result."""
         value = self.get(key)
         if value is not None:
             return value
@@ -114,6 +122,7 @@ class LRUCache:
         return value
 
     def get_stats(self) -> dict:
+        """Return hit rate, miss count, eviction count, and current size."""
         with self._lock:
             total_requests = self._stats["hits"] + self._stats["misses"]
             hit_rate = (
@@ -129,10 +138,12 @@ class LRUCache:
             }
 
     def keys(self) -> list:
+        """Return a list of all keys currently in the cache."""
         with self._lock:
             return list(self._cache.keys())
 
     def values(self) -> list:
+        """Return a list of all non-expired values currently in the cache."""
         with self._lock:
             return [
                 entry.value 
@@ -146,19 +157,23 @@ class CacheManager:
         self._caches: dict[str, LRUCache] = {}
 
     def get_cache(self, name: str, max_size: int = 1000, ttl: int = 300) -> LRUCache:
+        """Return a named LRUCache, creating it with given params if it does not exist."""
         if name not in self._caches:
             self._caches[name] = LRUCache(max_size=max_size, default_ttl=ttl)
         return self._caches[name]
 
     def clear_all(self):
+        """Clear all caches managed by this CacheManager."""
         for cache in self._caches.values():
             cache.clear()
 
     def cleanup_all(self):
+        """Evict expired entries from every cache in the manager."""
         for cache in self._caches.values():
             cache.cleanup_expired()
 
     def get_stats(self) -> dict:
+        """Return hit rate, miss count, eviction count, and current size."""
         return {
             name: cache.get_stats()
             for name, cache in self._caches.items()
@@ -166,6 +181,7 @@ class CacheManager:
 
 
 def make_cache_key(*args, **kwargs) -> str:
+    """Generate a deterministic MD5 cache key from the given arguments."""
     key_parts = [str(arg) for arg in args]
     key_parts.extend(f"{k}={v}" for k, v in sorted(kwargs.items()))
     key_string = ":".join(key_parts)
@@ -176,6 +192,7 @@ _cache_manager: Optional[CacheManager] = None
 
 
 def get_cache_manager() -> CacheManager:
+    """Return the global singleton CacheManager, creating it if needed."""
     global _cache_manager
     if _cache_manager is None:
         _cache_manager = CacheManager()
@@ -183,8 +200,11 @@ def get_cache_manager() -> CacheManager:
 
 
 def cached(ttl: int = 300, cache_name: str = "default"):
+    """Cached."""
     def decorator(func):
+        """Decorator."""
         def wrapper(*args, **kwargs):
+            """Wrapper."""
             cache = get_cache_manager().get_cache(cache_name, ttl=ttl)
             key = make_cache_key(func.__name__, *args, **kwargs)
             

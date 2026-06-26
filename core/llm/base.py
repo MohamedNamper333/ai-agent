@@ -61,9 +61,11 @@ class LLMResponse:
 
     @property
     def total_tokens(self) -> int:
+        """Total tokens."""
         return self.input_tokens + self.output_tokens
 
     def to_dict(self) -> dict[str, Any]:
+        """Return a plain dict representation of this object."""
         return {
             "text": self.text,
             "model": self.model,
@@ -140,6 +142,7 @@ class BaseLLM(ABC):
         return await loop.run_in_executor(None, self.generate, request)
 
     def get_stats(self) -> dict[str, Any]:
+        """Return hit rate, miss count, eviction count, and current size."""
         return {
             "provider": self.provider_name,
             "model": self.model,

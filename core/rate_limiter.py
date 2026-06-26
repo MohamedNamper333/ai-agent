@@ -28,6 +28,7 @@ class RateLimiter:
             self._last_cleanup = current_time
 
     def is_allowed(self, key: str) -> bool:
+        """Return True if the key is within its rate limit window."""
         self._cleanup_old_entries()
         
         current_time = time.time()
@@ -43,6 +44,7 @@ class RateLimiter:
             return True
 
     def get_remaining(self, key: str) -> int:
+        """Return how many requests remain for the key in this window."""
         current_time = time.time()
         cutoff = current_time - self.window_seconds
         
@@ -51,6 +53,7 @@ class RateLimiter:
             return max(0, self.max_requests - len(recent))
 
     def get_reset_time(self, key: str) -> Optional[float]:
+        """Return seconds until the oldest request exits the window."""
         with self._lock:
             if not self._requests.get(key):
                 return None
@@ -68,10 +71,12 @@ class TieredRateLimiter:
         }
 
     def is_allowed(self, key: str, tier: str = "basic") -> bool:
+        """Return True if the key is within its rate limit window."""
         limiter = self._limiters.get(tier, self._limiters["basic"])
         return limiter.is_allowed(key)
 
     def get_remaining(self, key: str, tier: str = "basic") -> int:
+        """Return how many requests remain for the key in this window."""
         limiter = self._limiters.get(tier, self._limiters["basic"])
         return limiter.get_remaining(key)
 
@@ -80,6 +85,7 @@ _rate_limiter: Optional[TieredRateLimiter] = None
 
 
 def get_rate_limiter() -> TieredRateLimiter:
+    """Return the global singleton TieredRateLimiter."""
     global _rate_limiter
     if _rate_limiter is None:
         _rate_limiter = TieredRateLimiter()

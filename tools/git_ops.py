@@ -32,10 +32,12 @@ class GitOps:
 
     @staticmethod
     def git_status(path: str = "") -> str:
+        """Return the short git status of the working tree."""
         return GitOps._run_git(["status", "--short"], path)
 
     @staticmethod
     def git_diff(path: str = "", staged: bool = False) -> str:
+        """Return the git diff output, optionally for staged changes only."""
         args = ["diff"]
         if staged:
             args.append("--staged")
@@ -46,6 +48,7 @@ class GitOps:
 
     @staticmethod
     def git_log(path: str = "", count: int = 20) -> str:
+        """Return the git log as a decorated one-line graph."""
         return GitOps._run_git(
             ["log", f"-{count}", "--oneline", "--graph", "--decorate"],
             path,
@@ -53,10 +56,12 @@ class GitOps:
 
     @staticmethod
     def git_branch(path: str = "") -> str:
+        """Return all local and remote branches."""
         return GitOps._run_git(["branch", "-a"], path)
 
     @staticmethod
     def git_show(commit: str = "HEAD", path: str = "") -> str:
+        """Show the details of the given commit."""
         result = GitOps._run_git(["show", commit, "--stat", "--no-patch"], path)
         if len(result) < 2000:
             result = GitOps._run_git(["show", commit], path)
@@ -66,6 +71,7 @@ class GitOps:
 
     @staticmethod
     def is_git_repo(path: str = "") -> str:
+        """Return the git root path, or a message if not in a repo."""
         p = Path(path) if path else Path.cwd()
         git_dir = p / ".git"
         if git_dir.exists() and git_dir.is_dir():
@@ -75,6 +81,7 @@ class GitOps:
 
     @staticmethod
     def git_add(files: str = ".", path: str = "") -> str:
+        """Stage one or more files for the next commit."""
         file_list = [f.strip() for f in files.split(",") if f.strip()]
         if not file_list:
             file_list = ["."]
@@ -91,6 +98,7 @@ class GitOps:
 
     @staticmethod
     def git_commit(message: str, path: str = "") -> str:
+        """Create a commit with the given message."""
         if not message:
             return "Error: Commit message is required"
 
@@ -99,6 +107,7 @@ class GitOps:
 
     @staticmethod
     def git_blame(file_path: str, path: str = "") -> str:
+        """Return line-by-line authorship information for the file."""
         if not file_path:
             return "Error: File path is required"
 

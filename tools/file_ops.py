@@ -10,6 +10,7 @@ class FileOps:
 
     @staticmethod
     def read_file(path: str, offset: int = 0, limit: int = 2000) -> str:
+        """Read and return file content with optional line offset and limit."""
         try:
             p = validate_path(path)
             
@@ -35,6 +36,7 @@ class FileOps:
 
     @staticmethod
     def write_file(path: str, content: str) -> str:
+        """Write content to a file, creating parent directories as needed."""
         try:
             p = validate_path(path)
             p.parent.mkdir(parents=True, exist_ok=True)
@@ -47,6 +49,7 @@ class FileOps:
 
     @staticmethod
     def edit_file(path: str, old_string: str, new_string: str) -> str:
+        """Replace all occurrences of old_string with new_string in the file."""
         try:
             p = validate_path(path)
             if not p.exists():
@@ -64,6 +67,7 @@ class FileOps:
 
     @staticmethod
     def glob_search(pattern: str, path: str = "") -> str:
+        """Find files matching the given glob pattern under the given path."""
         try:
             search_path = Path(path) if path else Path.cwd()
             if not search_path.exists():
@@ -78,6 +82,7 @@ class FileOps:
 
     @staticmethod
     def grep_search(pattern: str, path: str = "", include: str = "*") -> str:
+        """Search file contents for a regex pattern and return matching lines."""
         try:
             search_path = Path(path) if path else Path.cwd()
             if not search_path.exists():
@@ -105,6 +110,7 @@ class FileOps:
 
     @staticmethod
     def list_directory(path: str = "") -> str:
+        """Return a formatted listing of files and subdirectories."""
         try:
             p = Path(path) if path else Path.cwd()
             if not p.exists():
@@ -131,6 +137,7 @@ class FileOps:
 
     @staticmethod
     def file_info(path: str) -> str:
+        """Return metadata for the given file or directory."""
         try:
             p = validate_path(path)
             if not p.exists():
@@ -149,6 +156,7 @@ class FileOps:
 
     @staticmethod
     def file_compare(file1: str, file2: str) -> str:
+        """Compare two files line by line and return a diff summary."""
         try:
             p1 = validate_path(file1)
             p2 = validate_path(file2)
@@ -172,6 +180,7 @@ class FileOps:
 
     @staticmethod
     def batch_read(paths: str) -> str:
+        """Read and return the content of multiple comma-separated file paths."""
         file_list = [p.strip() for p in paths.split(",") if p.strip()]
         if not file_list:
             return "Error: No paths provided"

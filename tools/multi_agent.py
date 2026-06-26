@@ -21,6 +21,7 @@ class SpecialistAgent:
 
     def process(self, task: str, context: str = "", tools: str = "",
                 previous_analyses: str = "") -> str:
+        """Run this specialist agent on the task and return the result string."""
         prompt_parts = [
             f"<|system|>\nYou are {self.name}, a specialist AI agent.",
             f"Role: {self.role}",
@@ -60,6 +61,7 @@ class SpecialistAgent:
         return response
 
     def get_history(self) -> list[dict]:
+        """Return the last N execution history entries."""
         return list(self.memory)
 
 
@@ -119,6 +121,7 @@ class MultiAgentOrchestrator:
         ]
 
     def run_council(self, task: str, context: str = "", parallel: bool = True) -> str:
+        """Convene all specialists and return a synthesized final answer."""
         if parallel:
             results = self._run_parallel(task, context)
         else:
@@ -174,12 +177,14 @@ class MultiAgentOrchestrator:
         return results
 
     def delegate(self, agent_name: str, task: str, context: str = "", tools: str = "") -> str:
+        """Route a task to a named specialist and return their response."""
         for agent in self.specialists:
             if agent.name.lower() == agent_name.lower():
                 return agent.process(task, context, tools)
         return f"Unknown specialist: {agent_name}. Available: {', '.join(a.name for a in self.specialists)}"
 
     def debate(self, topic: str, rounds: int = 2) -> str:
+        """Run a structured debate and return the moderator summary."""
         debate_history = []
         for round_num in range(rounds):
             for agent in self.specialists:
@@ -214,6 +219,7 @@ class MultiAgentOrchestrator:
         return self.model.generate(final_prompt, max_tokens=2000)
 
     def group_consensus(self, task: str, options: list[str]) -> str:
+        """Collect votes from all agents and return the weighted consensus."""
         votes = []
         for agent in self.specialists:
             prompt = (
@@ -266,6 +272,7 @@ class MultiAgentOrchestrator:
         return "\n".join(result)
 
     def get_specialist_info(self) -> list[dict]:
+        """Return metadata about each specialist agent in the swarm."""
         return [
             {
                 "name": s.name,

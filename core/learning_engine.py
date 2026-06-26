@@ -56,11 +56,13 @@ class ToolPattern:
 
     @property
     def success_rate(self) -> float:
+        """Success rate."""
         total = self.success_count + self.failure_count
         return self.success_count / total if total > 0 else 0.0
 
     @property
     def is_reliable(self) -> bool:
+        """Is reliable."""
         return self.success_rate >= 0.85 and (self.success_count + self.failure_count) >= 5
 
 
@@ -182,6 +184,7 @@ class LearningEngine:
         This improves the agent's tool selection without any retraining.
         """
         def sort_key(name: str) -> float:
+            """Sort key."""
             if name in self._tool_patterns:
                 tp = self._tool_patterns[name]
                 # Score = success_rate * (1 - penalty for slowness)
@@ -234,6 +237,7 @@ class LearningEngine:
     #  Analytics
     # ─────────────────────────────────────────
     def get_stats(self) -> dict:
+        """Return hit rate, miss count, eviction count, and current size."""
         total = len(self._session_interactions)
         positive = sum(1 for ix in self._session_interactions if ix.feedback_score > 0)
         negative = sum(1 for ix in self._session_interactions if ix.feedback_score < 0)
@@ -271,6 +275,7 @@ class LearningEngine:
         return str(self._finetune_path)
 
     def get_finetune_count(self) -> int:
+        """Get finetune count."""
         if not self._finetune_path.exists():
             return 0
         return sum(1 for _ in open(self._finetune_path))
@@ -323,6 +328,7 @@ class LearningEngine:
 _engine: Optional[LearningEngine] = None
 
 def get_learning_engine() -> LearningEngine:
+    """Get learning engine."""
     global _engine
     if _engine is None:
         _engine = LearningEngine()

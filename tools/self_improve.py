@@ -16,6 +16,7 @@ class SelfImprover:
         self.project_dir = Path(__file__).parent.parent
 
     def analyze_codebase(self) -> str:
+        """Scan the project directory and return a structural summary."""
         files = []
         total_lines = 0
         total_files = 0
@@ -60,6 +61,7 @@ class SelfImprover:
         return "\n".join(result)
 
     def suggest_improvements(self, file_path: str) -> str:
+        """Use static analysis and LLM to suggest improvements for a file."""
         p = Path(file_path)
         if not p.exists() or not p.is_file():
             return f"File not found: {file_path}"
@@ -79,6 +81,7 @@ class SelfImprover:
         return self.model.generate(prompt, max_tokens=1500)
 
     def apply_improvement(self, file_path: str, instructions: str) -> str:
+        """Apply an LLM-generated code improvement and create a backup."""
         p = Path(file_path)
         if not p.exists() or not p.is_file():
             return f"File not found: {file_path}"
@@ -116,6 +119,7 @@ class SelfImprover:
             return f"Error applying improvement: {e}. Original restored."
 
     def run_self_review(self) -> str:
+        """Analyze the full codebase and return a consolidated review report."""
         parts = [self.analyze_codebase(), ""]
 
         files = []
@@ -135,6 +139,7 @@ class SelfImprover:
         return "\n".join(parts)
 
     def get_code_metrics(self) -> str:
+        """Compute and return aggregate metrics for the entire codebase."""
         metrics = {
             "total_files": 0,
             "total_lines": 0,

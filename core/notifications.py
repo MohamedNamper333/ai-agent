@@ -17,6 +17,7 @@ class Notification:
         self.created_at = datetime.now().isoformat()
 
     def to_dict(self):
+        """Return a plain dict representation of this object."""
         return {
             "id": self.id,
             "user_id": self.user_id,
@@ -64,12 +65,14 @@ class NotificationManager:
         )
 
     def add_notification(self, user_id: str, title: str, message: str, ntype: str = "info") -> bool:
+        """Create and persist a new notification for the user."""
         notif = Notification(user_id, title, message, ntype)
         self.notifications.append(notif)
         self._save()
         return True
 
     def get_notifications(self, user_id: str, unread_only: bool = False) -> List[Dict]:
+        """Return all notifications for a user, optionally unread-only."""
         result = []
         for n in self.notifications:
             if n.user_id == user_id:
@@ -79,6 +82,7 @@ class NotificationManager:
         return result
 
     def mark_read(self, notification_id: str) -> bool:
+        """Mark the notification with the given ID as read."""
         for n in self.notifications:
             if n.id == notification_id:
                 n.read = True
@@ -87,9 +91,11 @@ class NotificationManager:
         return False
 
     def get_unread_count(self, user_id: str) -> int:
+        """Return the count of unread notifications for the user."""
         return len([n for n in self.notifications if n.user_id == user_id and not n.read])
 
     def delete_notification(self, notification_id: str) -> bool:
+        """Permanently delete the notification with the given ID."""
         for i, n in enumerate(self.notifications):
             if n.id == notification_id:
                 self.notifications.pop(i)
@@ -98,6 +104,7 @@ class NotificationManager:
         return False
 
     def clear_read(self, user_id: str) -> int:
+        """Delete all read notifications and return the count removed."""
         before = len(self.notifications)
         self.notifications = [n for n in self.notifications if not (n.user_id == user_id and n.read)]
         self._save()

@@ -38,6 +38,7 @@ class Finding:
     pass_number: int = 1
 
     def to_text(self) -> str:
+        """To text."""
         sev_icons = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🔵", "info": "⚪"}
         icon = sev_icons.get(self.severity, "•")
         lines = [
@@ -65,13 +66,16 @@ class AnalysisResult:
 
     @property
     def critical_count(self) -> int:
+        """Critical count."""
         return sum(1 for f in self.findings if f.severity == "critical")
 
     @property
     def high_count(self) -> int:
+        """High count."""
         return sum(1 for f in self.findings if f.severity == "high")
 
     def to_report(self) -> str:
+        """To report."""
         sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
         sorted_findings = sorted(self.findings, key=lambda f: sev_order.get(f.severity, 5))
 

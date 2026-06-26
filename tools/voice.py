@@ -9,6 +9,7 @@ from typing import Optional
 class VoiceTools:
     @staticmethod
     def listen(timeout: int = 5, phrase_limit: int = 10, language: str = "en") -> str:
+        """Listen via microphone and return the transcribed speech text."""
         try:
             import speech_recognition as sr
             r = sr.Recognizer()
@@ -50,6 +51,7 @@ class VoiceTools:
 
     @staticmethod
     def speak(text: str, rate: int = 150, volume: float = 1.0) -> str:
+        """Convert text to speech and play it through the default audio device."""
         try:
             import pyttsx3
             engine = pyttsx3.init()
@@ -71,6 +73,7 @@ class VoiceTools:
 
     @staticmethod
     def save_speech(text: str, file_path: str = "", language: str = "en") -> str:
+        """Convert text to speech and save it as an MP3 file."""
         try:
             from gtts import gTTS
             output = file_path or str(Path(tempfile.gettempdir()) / "agent_speech.mp3")
@@ -84,6 +87,7 @@ class VoiceTools:
 
     @staticmethod
     def whisper_transcribe(file_path: str, language: str = "") -> str:
+        """Transcribe an audio file using the Whisper model."""
         p = Path(file_path)
         if not p.exists():
             return f"Error: File not found: {file_path}"
@@ -120,6 +124,7 @@ class VoiceTools:
 
     @staticmethod
     def audio_info(file_path: str) -> str:
+        """Return technical metadata for the given audio file."""
         p = Path(file_path)
         if not p.exists():
             return f"Error: File not found: {file_path}"
@@ -145,6 +150,7 @@ class VoiceTools:
 
     @staticmethod
     def list_microphones() -> str:
+        """Return a list of available microphone devices."""
         try:
             import speech_recognition as sr
             mics = sr.Microphone.list_microphone_names()

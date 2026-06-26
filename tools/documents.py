@@ -11,6 +11,7 @@ from typing import Optional
 class DocumentTools:
     @staticmethod
     def read_pdf(file_path: str, max_pages: int = 20) -> str:
+        """Extract and return text from each page of a PDF file."""
         p = Path(file_path)
         if not p.exists():
             return f"Error: File not found: {file_path}"
@@ -39,6 +40,7 @@ class DocumentTools:
 
     @staticmethod
     def read_docx(file_path: str) -> str:
+        """Extract paragraphs and tables from a Word document."""
         p = Path(file_path)
         if not p.exists():
             return f"Error: File not found: {file_path}"
@@ -69,6 +71,7 @@ class DocumentTools:
 
     @staticmethod
     def analyze_image(file_path: str) -> str:
+        """Return image metadata and optional OCR text."""
         p = Path(file_path)
         if not p.exists():
             return f"Error: File not found: {file_path}"
@@ -101,6 +104,7 @@ class DocumentTools:
 
     @staticmethod
     def ocr_image(file_path: str) -> str:
+        """Extract and return text from an image using OCR."""
         p = Path(file_path)
         if not p.exists():
             return f"Error: File not found: {file_path}"
@@ -121,6 +125,7 @@ class DocumentTools:
 
     @staticmethod
     def read_excel(file_path: str, sheet: str = "") -> str:
+        """Read an Excel file and return the first sheet contents."""
         p = Path(file_path)
         if not p.exists():
             return f"Error: File not found: {file_path}"
@@ -157,6 +162,7 @@ class DocumentTools:
 
     @staticmethod
     def html_to_text(html_content: str) -> str:
+        """Strip HTML tags and return clean plain text."""
         try:
             import re
             text = re.sub(r'<script[^>]*>.*?</script>', '', html_content, flags=re.DOTALL | re.IGNORECASE)

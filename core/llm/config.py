@@ -17,6 +17,7 @@ except ImportError:
     BASE_DIR_FALLBACK = Path(__file__).resolve().parent.parent.parent
 
     def get_env(key: str, default: Optional[str] = None) -> Optional[str]:
+        """Get env."""
         return os.environ.get(key, default)
 
 

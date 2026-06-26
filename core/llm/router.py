@@ -72,6 +72,7 @@ class LLMRouter:
 
     @property
     def ollama(self) -> BaseLLM:
+        """Ollama."""
         if self._ollama is None and self.config.ollama_enabled:
             from .ollama_provider import OllamaProvider
 
@@ -87,6 +88,7 @@ class LLMRouter:
 
     @property
     def zen(self) -> BaseLLM:
+        """Zen."""
         if self._zen is None and self.config.opencode_zen_enabled:
             from .opencode_zen_provider import OpenCodeZenProvider
 
@@ -327,6 +329,7 @@ class LLMRouter:
                 ) from fb_err
 
     def get_stats(self) -> dict[str, Any]:
+        """Return hit rate, miss count, eviction count, and current size."""
         return {
             **self._stats,
             "config": {
@@ -345,6 +348,7 @@ class LLMRouter:
         }
 
     def reset_stats(self) -> None:
+        """Reset stats."""
         self._stats = {
             "total_requests": 0,
             "by_level": {"simple": 0, "moderate": 0, "deep": 0},

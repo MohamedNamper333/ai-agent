@@ -11,6 +11,7 @@ class DockerSandbox:
 
     @classmethod
     def is_available(cls) -> bool:
+        """Return True if Docker is installed and the daemon is running."""
         if cls._available is not None:
             return cls._available
         try:
@@ -25,6 +26,7 @@ class DockerSandbox:
 
     @classmethod
     def run_code(cls, code: str, language: str = "python", timeout: int = 30) -> str:
+        """Execute code in an isolated Docker container and return the output."""
         if not cls.is_available():
             return "Error: Docker not available. Use run_code tool instead."
 
@@ -73,6 +75,7 @@ class DockerSandbox:
 
     @classmethod
     def run_file(cls, file_path: str, language: str = "python") -> str:
+        """Read a file and execute its contents in a Docker container."""
         p = Path(file_path)
         if not p.exists():
             return f"Error: File not found: {file_path}"
@@ -81,6 +84,7 @@ class DockerSandbox:
 
     @classmethod
     def run_with_volume(cls, code: str, volume_path: str, language: str = "python") -> str:
+        """Run code in Docker with a mounted host directory."""
         if not cls.is_available():
             return "Error: Docker not available"
 
@@ -125,6 +129,7 @@ class DockerSandbox:
 
     @classmethod
     def list_images(cls) -> str:
+        """Return a formatted list of locally available Docker images."""
         if not cls.is_available():
             return "Docker not available"
         try:
@@ -138,6 +143,7 @@ class DockerSandbox:
 
     @classmethod
     def list_containers(cls, all_containers: bool = True) -> str:
+        """Return a formatted list of Docker containers."""
         if not cls.is_available():
             return "Docker not available"
         try:
@@ -153,6 +159,7 @@ class DockerSandbox:
 
     @classmethod
     def docker_info(cls) -> str:
+        """Return Docker version and disk usage information."""
         if not cls.is_available():
             return "Docker not available"
         try:
@@ -174,6 +181,7 @@ class DockerSandbox:
 
     @classmethod
     def cleanup(cls) -> str:
+        """Remove stopped containers and unused images with docker system prune."""
         if not cls.is_available():
             return "Docker not available"
         try:

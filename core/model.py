@@ -56,9 +56,11 @@ class LLM:
 
     @property
     def is_loaded(self) -> bool:
+        """Return True if a model backend is ready to generate text."""
         return self._use_ollama or self._use_gpt4all or self._model is not None
 
     def load(self, model_path: str = "") -> None:
+        """Load data from storage."""
         path = model_path or config.MODEL_PATH
 
         if self._backend == "gpt4all" or (self._backend == "auto" and self._detect_gpt4all()):
@@ -193,6 +195,7 @@ class LLM:
         stream: bool = False,
         retries: int = 0,
     ):
+        """Generate."""
         max_retries = retries if retries > 0 else self.MAX_RETRIES
 
         for attempt in range(max_retries):
@@ -211,6 +214,7 @@ class LLM:
                     self._retry_stats["failed"] += 1
                     if stream:
                         def error_gen():
+                            """Error gen."""
                             yield f"\n[Model error: {error.message}]"
                         return error_gen()
                     return f"[Model error: {error.message}]"
@@ -225,6 +229,7 @@ class LLM:
         self._retry_stats["failed"] += 1
         if stream:
             def error_gen():
+                """Error gen."""
                 yield "[Model error: Max retries exceeded]"
             return error_gen()
         return "[Model error: Max retries exceeded]"
@@ -254,6 +259,7 @@ class LLM:
 
         if stream:
             def gen():
+                """Gen."""
                 for token in self._model.generate(
                     prompt=prompt,
                     max_tokens=mt,
@@ -292,6 +298,7 @@ class LLM:
 
         if stream:
             def gen():
+                """Gen."""
                 try:
                     r = requests.post(
                         f"{self._ollama_base}/api/generate",
@@ -341,6 +348,7 @@ class LLM:
 
         if stream:
             def gen():
+                """Gen."""
                 for chunk in self._model.create_completion(
                     prompt=prompt, max_tokens=mt, temperature=temp,
                     stop=stops, stream=True, echo=False,
@@ -359,6 +367,7 @@ class LLM:
             return result.get("choices", [{}])[0].get("text", "")
 
     def tokenize(self, text: str) -> list[int]:
+        """Tokenize."""
         if self._use_ollama:
             return self._ollama_tokenize(text)
         if not self._model:
@@ -390,6 +399,7 @@ class LLM:
         return list(range(estimated))
 
     def count_tokens(self, text: str) -> int:
+        """Return the estimated token count for the given text."""
         if self._use_ollama:
             cache_key = hashlib.md5(text.encode()).hexdigest()
             if cache_key in self._token_cache:
@@ -417,9 +427,11 @@ class LLM:
 
     async def agenerate(self, prompt: str, max_tokens=None, temperature=None,
                         stop=None, stream=False, retries=0):
+        """Agenerate."""
         import asyncio
         if stream:
             def gen():
+                """Gen."""
                 return self.generate(prompt, max_tokens, temperature, stop, stream=True, retries=retries)
             return await asyncio.to_thread(gen)
         return await asyncio.to_thread(
@@ -427,9 +439,11 @@ class LLM:
         )
 
     def get_retry_stats(self) -> dict:
+        """Return retry statistics for the current session."""
         return dict(self._retry_stats)
 
     def unload(self):
+        """Release the model from memory."""
         self._model = None
         self._token_cache.clear()
 

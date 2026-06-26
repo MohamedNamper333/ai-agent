@@ -16,9 +16,9 @@ from fastapi.testclient import TestClient
 # ---------------------------------------------------------------------------
 
 def _make_client():
-    """Return a fresh TestClient with startup skipped and agent mocked."""
-    from web import app
-
+    """Return a fresh TestClient with clean ServerState for each test."""
+    from web import app, ServerState
+    app.state.srv = ServerState()
     client = TestClient(app, raise_server_exceptions=False)
     return client
 

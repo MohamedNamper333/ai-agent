@@ -49,6 +49,7 @@ class AgentEvent:
     error: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
+        """Return a plain dict representation of this object."""
         return asdict(self)
 
 
@@ -166,10 +167,12 @@ class Telemetry:
             logger.warning("Telemetry flush failed: %s", e)
 
     def flush(self) -> None:
+        """Write all buffered events to the JSONL output file immediately."""
         with self._lock:
             self._flush()
 
     def get_session_events(self) -> list[AgentEvent]:
+        """Return a thread-safe copy of all events recorded in this session."""
         with self._lock:
             return list(self._events)
 
@@ -213,9 +216,11 @@ class Telemetry:
         }
 
     def reset(self) -> None:
+        """Clear all in-memory events and the write buffer."""
         with self._lock:
             self._events.clear()
             self._buffer.clear()
 
     def close(self) -> None:
+        """Flush remaining events and finalize the telemetry session."""
         self.flush()

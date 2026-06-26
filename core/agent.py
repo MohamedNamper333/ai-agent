@@ -219,9 +219,11 @@ class Agent:
         return result
 
     def start_new_conversation(self, conversation_id: str = "") -> str:
+        """Start a fresh conversation and return its ID."""
         return self.memory.new_conversation(conversation_id)
 
     def chat(self, user_input: str, stream: bool = False):
+        """Process a user message and return the agent response (stream or string)."""
         self.memory.add_message("user", user_input)
 
         # RAG: retrieve knowledge
@@ -288,6 +290,7 @@ class Agent:
             return self._stream_agent_loop(user_input, tool_desc, history)
 
     async def achat(self, user_input: str, stream: bool = False):
+        """Async wrapper around chat() for use in async contexts."""
         import asyncio
         if stream:
             return self.chat(user_input, stream=True)
@@ -723,12 +726,15 @@ class Agent:
         self.memory.add_message("assistant", full_response)
 
     def get_history(self) -> list[dict]:
+        """Return the last N execution history entries."""
         return self.memory.get_trimmed_history()
 
     def get_cache_stats(self) -> dict:
+        """Get cache stats."""
         return self._cache.get_stats()
 
     def get_execution_history(self) -> list[dict]:
+        """Get execution history."""
         history = []
         for plan in self._execution_history:
             history.append({

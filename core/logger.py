@@ -12,6 +12,7 @@ from contextlib import contextmanager
 
 class StructuredFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
+        """Format."""
         log_entry = {
             "timestamp": datetime.fromtimestamp(record.created).isoformat(),
             "level": record.levelname,
@@ -42,6 +43,7 @@ class HumanReadableFormatter(logging.Formatter):
     RESET = "\033[0m"
     
     def format(self, record: logging.LogRecord) -> str:
+        """Format."""
         color = self.COLORS.get(record.levelname, "")
         timestamp = datetime.fromtimestamp(record.created).strftime("%Y-%m-%d %H:%M:%S")
         
@@ -95,23 +97,29 @@ class AgentLogger:
         self.logger.addHandler(error_handler)
     
     def debug(self, message: str, **kwargs):
+        """Log a debug-level message with optional structured data."""
         self.logger.debug(message, extra={"extra_data": kwargs})
     
     def info(self, message: str, **kwargs):
+        """Log an info-level message with optional structured data."""
         self.logger.info(message, extra={"extra_data": kwargs})
     
     def warning(self, message: str, **kwargs):
+        """Log a warning-level message with optional structured data."""
         self.logger.warning(message, extra={"extra_data": kwargs})
     
     def error(self, message: str, **kwargs):
+        """Log an error-level message and increment the error counter."""
         self.logger.error(message, extra={"extra_data": kwargs})
         self._metrics["total_errors"] += 1
     
     def critical(self, message: str, **kwargs):
+        """Log a critical-level message and increment the error counter."""
         self.logger.critical(message, extra={"extra_data": kwargs})
         self._metrics["total_errors"] += 1
     
     def log_request(self, endpoint: str, method: str, status_code: int, duration: float):
+        """Record an HTTP request with its status code and duration."""
         self._metrics["total_requests"] += 1
         self.info(
             f"HTTP {method} {endpoint} - {status_code}",
@@ -122,6 +130,7 @@ class AgentLogger:
         )
     
     def log_tool_call(self, tool_name: str, success: bool, duration: float):
+        """Record a tool call result with success/failure and duration."""
         self._metrics["tool_calls"] += 1
         level = "info" if success else "warning"
         getattr(self, level)(
@@ -132,6 +141,7 @@ class AgentLogger:
         )
     
     def log_chat(self, message: str, response_length: int, user_id: Optional[str] = None):
+        """Record a processed chat message with lengths and optional user ID."""
         self.info(
             f"Chat message processed ({response_length} chars)",
             message_length=len(message),
@@ -141,6 +151,7 @@ class AgentLogger:
     
     @contextmanager
     def timer(self, operation: str):
+        """Context manager that logs the wall-clock time of the enclosed block."""
         start = time.time()
         try:
             yield
@@ -149,6 +160,7 @@ class AgentLogger:
             self.info(f"Operation completed: {operation}", duration_ms=round(duration * 1000, 2))
     
     def get_metrics(self) -> dict:
+        """Return uptime, request count, error count, and throughput metrics."""
         uptime = time.time() - self._metrics["start_time"]
         return {
             "uptime_seconds": round(uptime, 2),
@@ -165,6 +177,7 @@ _loggers: dict[str, AgentLogger] = {}
 
 
 def get_logger(name: str = "agent") -> AgentLogger:
+    """Return a named AgentLogger, creating it if needed."""
     if name not in _loggers:
         _loggers[name] = AgentLogger(name)
     return _loggers[name]

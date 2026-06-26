@@ -16,6 +16,7 @@ class LongTermMemory:
         self._loaded = False
 
     def load(self):
+        """Load data from storage."""
         if self._loaded:
             return
         if os.path.exists(self.db_path):
@@ -27,6 +28,7 @@ class LongTermMemory:
         self._loaded = True
 
     def add_summary(self, conversation_id: str, summary: str, topics: list[str] = None):
+        """Store a new conversation summary with topics and timestamp."""
         self.load()
         self.summaries.append({
             "conversation_id": conversation_id,
@@ -37,6 +39,7 @@ class LongTermMemory:
         self._save()
 
     def search(self, query: str, top_k: int = 5) -> list[dict]:
+        """Full-text search across all conversations and return scored results."""
         self.load()
         query_lower = query.lower()
         query_words = set(query_lower.split())
@@ -75,6 +78,7 @@ class LongTermMemory:
         return scored[:top_k]
 
     def get_context(self, query: str) -> str:
+        """Return a formatted recall string for the most relevant summaries."""
         results = self.search(query)
         if not results:
             return ""
@@ -85,6 +89,7 @@ class LongTermMemory:
         return "\n".join(parts)
 
     def get_stats(self) -> dict:
+        """Return hit rate, miss count, eviction count, and current size."""
         self.load()
         return {
             "total_summaries": len(self.summaries),
@@ -96,6 +101,7 @@ class LongTermMemory:
         }
 
     def delete_summary(self, conversation_id: str) -> bool:
+        """Delete all summaries for the given conversation ID."""
         self.load()
         original_len = len(self.summaries)
         self.summaries = [s for s in self.summaries if s.get("conversation_id") != conversation_id]

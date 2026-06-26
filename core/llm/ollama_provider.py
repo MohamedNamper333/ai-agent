@@ -57,6 +57,7 @@ class OllamaProvider(BaseLLM):
             ) from e
 
     def is_available(self) -> bool:
+        """Return True if Docker is installed and the daemon is running."""
         if self._llm is None:
             return False
         try:
@@ -66,10 +67,12 @@ class OllamaProvider(BaseLLM):
             return False
 
     def validate_request(self, request: LLMRequest) -> None:
+        """Validate request."""
         if not request.prompt or not request.prompt.strip():
             raise ValueError("prompt cannot be empty")
 
     def generate(self, request: LLMRequest) -> LLMResponse:
+        """Generate."""
         if self._llm is None:
             raise ProviderUnavailable(
                 "Ollama LLM not initialized", provider=self.provider_name
@@ -120,6 +123,7 @@ class OllamaProvider(BaseLLM):
         )
 
     def stream(self, request: LLMRequest) -> Iterator[str]:
+        """Stream."""
         if self._llm is None:
             raise ProviderUnavailable(
                 "Ollama LLM not initialized", provider=self.provider_name
@@ -163,6 +167,7 @@ class OllamaProvider(BaseLLM):
             ) from e
 
     def get_stats(self) -> dict[str, Any]:
+        """Return hit rate, miss count, eviction count, and current size."""
         base = super().get_stats()
         base["url"] = self.url
         base["available"] = self.is_available()

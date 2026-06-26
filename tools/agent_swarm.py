@@ -30,13 +30,16 @@ class ContextBus:
         self._timeline: list[dict] = []
 
     def write(self, agent: str, key: str, value: Any) -> None:
+        """Write."""
         self._store[key] = value
         self._timeline.append({"agent": agent, "key": key, "ts": time.time()})
 
     def read(self, key: str, default: Any = None) -> Any:
+        """Read."""
         return self._store.get(key, default)
 
     def summary(self) -> str:
+        """Summary."""
         lines = [f"[{e['agent']}] shared: {e['key']}" for e in self._timeline[-8:]]
         return "\n".join(lines)
 
@@ -54,6 +57,7 @@ class AgentResult:
     pass_number: int = 1
 
     def summary(self) -> str:
+        """Summary."""
         s = "✓" if self.success else "✗"
         return f"[{s} {self.agent_name} | {self.time_ms:.0f}ms | {self.confidence:.0%}]\n{self.output}"
 
@@ -69,6 +73,7 @@ class TaskNode:
 
     @property
     def is_leaf(self) -> bool:
+        """Is leaf."""
         return not self.subtasks
 
 
@@ -85,9 +90,11 @@ class SwarmResult:
     task_tree: Optional[TaskNode] = None
 
     def to_text(self) -> str:
+        """To text."""
         return self.synthesis
 
     def to_detailed(self) -> str:
+        """To detailed."""
         lines = [
             f"## Swarm [{self.pattern}] | agents={self.success_count} | "
             f"confidence={self.avg_confidence:.0%} | {self.total_time_ms:.0f}ms",
@@ -116,6 +123,7 @@ class SwarmAgent:
     _model: Any = field(default=None, repr=False)
 
     def run(self, task: str, context: str = "", bus: Optional[ContextBus] = None, pass_number: int = 1) -> AgentResult:
+        """Run."""
         start = time.time()
         prompt = self._build_prompt(task, context, bus)
         try:
@@ -267,6 +275,7 @@ class TaskDecomposer:
         self._model = model
 
     def decompose(self, task: str, max_depth: int = 2) -> TaskNode:
+        """Decompose."""
         root = TaskNode(task_id=self._id(task), description=task, parent_id=None, depth=0)
         if max_depth > 0 and self._is_complex(task):
             for st in self._split(task):
@@ -345,9 +354,11 @@ class AgentSwarm:
             )
 
     def add_agent(self, key: str, agent: SwarmAgent) -> None:
+        """Add agent."""
         self._agents[key] = agent
 
     def run_parallel(self, task: str, agent_keys: Optional[list] = None, timeout_s: int = 120) -> SwarmResult:
+        """Run parallel."""
         self._bus = ContextBus()
         keys = agent_keys or list(self._agents.keys())
         agents = [self._agents[k] for k in keys if k in self._agents]
@@ -357,6 +368,7 @@ class AgentSwarm:
         return self._make_result(task, "PARALLEL", results, synthesis, time.time() - start)
 
     def run_pipeline(self, task: str, agent_keys: Optional[list] = None) -> SwarmResult:
+        """Run pipeline."""
         self._bus = ContextBus()
         keys = agent_keys or ["researcher", "architect", "coder", "security", "critic"]
         agents = [self._agents[k] for k in keys if k in self._agents]
@@ -372,6 +384,7 @@ class AgentSwarm:
         return self._make_result(task, "PIPELINE", results, synthesis, time.time() - start)
 
     def run_debate(self, task: str, agent_keys: Optional[list] = None, rounds: int = 2) -> SwarmResult:
+        """Run debate."""
         self._bus = ContextBus()
         keys = agent_keys or ["analyst", "critic", "architect", "optimizer", "forecaster"]
         agents = [self._agents[k] for k in keys if k in self._agents]
@@ -388,6 +401,7 @@ class AgentSwarm:
         return self._make_result(task, "DEBATE", all_results, synthesis, time.time() - start)
 
     def run_adversarial(self, task: str, solution_agents: Optional[list] = None) -> SwarmResult:
+        """Run adversarial."""
         self._bus = ContextBus()
         start = time.time()
         all_results: list[AgentResult] = []
@@ -407,6 +421,7 @@ class AgentSwarm:
         return self._make_result(task, "ADVERSARIAL", all_results, synthesis, time.time() - start)
 
     def run_recursive(self, task: str, max_depth: int = 2) -> SwarmResult:
+        """Run recursive."""
         self._bus = ContextBus()
         start = time.time()
         tree = self._decomposer.decompose(task, max_depth)
@@ -426,6 +441,7 @@ class AgentSwarm:
         return self._make_result(task, "RECURSIVE", all_results, synthesis, time.time() - start, task_tree=tree)
 
     def run_auto(self, task: str) -> SwarmResult:
+        """Run auto."""
         p = self._fingerprint(task)
         if p == "code":
             return self.run_pipeline(task, ["researcher", "coder", "security", "optimizer", "critic"])
@@ -520,13 +536,16 @@ class AgentSwarm:
         return sum(good) / len(good) if good else 0.0
 
     def get_available_agents(self) -> list:
+        """Get available agents."""
         return [{"key": k, "name": a.name, "role": a.role} for k, a in self._agents.items()]
 
     def get_history(self, n: int = 20) -> list:
+        """Return the last N execution history entries."""
         return [{"task": r.task[:80], "pattern": r.pattern, "agents": r.success_count,
                  "confidence": f"{r.avg_confidence:.0%}", "time_ms": round(r.total_time_ms)} for r in self._history[-n:]]
 
     def get_stats(self) -> dict:
+        """Return hit rate, miss count, eviction count, and current size."""
         if not self._history:
             return {"total_runs": 0}
         avg_conf = sum(r.avg_confidence for r in self._history) / len(self._history)

@@ -58,6 +58,7 @@ class CodeAnalysis:
 
     @staticmethod
     def scan_project(path: str = "", max_files: int = 100) -> str:
+        """Scan a directory and return file counts, line counts, and structure."""
         root = Path(path) if path else Path.cwd()
         if not root.exists():
             return f"Error: Path not found: {path}"
@@ -124,6 +125,7 @@ class CodeAnalysis:
 
     @staticmethod
     def review_code(file_path: str) -> str:
+        """Review a source file for quality, security issues, and code smells."""
         p = Path(file_path)
         if not p.exists():
             return f"Error: File not found: {file_path}"
@@ -399,6 +401,7 @@ class CodeAnalysis:
 
     @staticmethod
     def analyze_imports(file_path: str) -> str:
+        """Categorize imports in a Python file as stdlib, third-party, or local."""
         p = Path(file_path)
         if not p.exists():
             return f"Error: File not found: {file_path}"
@@ -488,6 +491,7 @@ class CodeAnalysis:
 
     @staticmethod
     def code_refactor(file_path: str, instructions: str = "") -> str:
+        """Suggest refactoring improvements for the given source file."""
         p = Path(file_path)
         if not p.exists():
             return f"Error: File not found: {file_path}"
@@ -549,6 +553,7 @@ class CodeAnalysis:
 
     @staticmethod
     def complexity_metrics(file_path: str) -> str:
+        """Return cyclomatic complexity and maintainability metrics."""
         p = Path(file_path)
         if not p.exists():
             return f"Error: File not found: {file_path}"
@@ -615,6 +620,7 @@ class CodeAnalysis:
 
     @staticmethod
     def analyze_security(file_path: str) -> str:
+        """Scan a file for known security vulnerability patterns."""
         p = Path(file_path)
         if not p.exists():
             return f"Error: File not found: {file_path}"
@@ -669,6 +675,7 @@ class CodeAnalysis:
 
     @staticmethod
     def dependency_graph(path: str = "") -> str:
+        """Build and return the internal import dependency graph."""
         root = Path(path) if path else Path.cwd()
         if not root.exists():
             return f"Error: Path not found: {path}"
@@ -738,6 +745,7 @@ class CodeAnalysis:
 
     @staticmethod
     def analyze_code_quality(file_path: str) -> str:
+        """Return a combined quality score with metrics and recommendations."""
         p = Path(file_path)
         if not p.exists():
             return f"Error: File not found: {file_path}"
@@ -785,6 +793,7 @@ class CodeAnalysis:
 
     @staticmethod
     def generate_test(file_path: str, function_name: str = "") -> str:
+        """Generate a pytest template for the functions in the given file."""
         p = Path(file_path)
         if not p.exists():
             return f"Error: File not found: {file_path}"
