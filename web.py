@@ -1,5 +1,8 @@
 """AI Agent - Web server (FastAPI)
 
+import logging
+logger = logging.getLogger(__name__)
+
 FIXES applied vs original:
   1. Auth middleware now validates Bearer token on protected endpoints
   2. Rate limiting middleware active on ALL requests
@@ -27,6 +30,7 @@ from pydantic import BaseModel, Field
 import uvicorn
 
 from core.model import LLM
+from core.hmac_middleware import AuditMiddleware, get_audit_logger
 from core.memory import ConversationMemory
 from core.tools import ToolRegistry
 from core.context import ContextManager
@@ -92,16 +96,16 @@ async def lifespan(app: FastAPI):
         else:
             srv.model_name = Path(config.MODEL_PATH).name
         srv.agent.memory.load()
-        print(f"Model loaded: {srv.model_name}")
+        logger.info(f"Model loaded: {srv.model_name}")
     except Exception as e:
-        print(f"Model load (deferred): {e}")
+        logger.info(f"Model load (deferred): {e}")
 
     try:
         srv.retriever = Retriever()
         srv.retriever.load_or_init()
-        print("RAG retriever initialized")
+        logger.info("RAG retriever initialized")
     except Exception as e:
-        print(f"RAG init: {e}")
+        logger.info(f"RAG init: {e}")
 
     yield
 
@@ -208,6 +212,7 @@ class _DynamicCORSMiddleware:
 
 
 app.add_middleware(_DynamicCORSMiddleware)
+app.add_middleware(AuditMiddleware, audit=get_audit_logger())
 
 
 # ─────────────────────────────────────────────
@@ -760,8 +765,8 @@ async def static_files(path: str):
 def run_server(host: str = "", port: int = 0):
     host = host or config.WEB_HOST
     port = port or config.WEB_PORT
-    print(f"Web UI: http://{host}:{port}")
-    print(f"API Docs: http://{host}:{port}/docs")
+    logger.info(f"Web UI: http://{host}:{port}")
+    logger.info(f"API Docs: http://{host}:{port}/docs")
     uvicorn.run(app, host=host, port=port, log_level="info")
 
 

@@ -1,3 +1,6 @@
+import logging
+logger = logging.getLogger(__name__)
+
 import json
 import sys
 import time
@@ -95,8 +98,8 @@ class LLM:
         self._use_gpt4all = True
         self._gpt4all_model_name = config.GPT4ALL_MODEL
 
-        print(f"Loading gpt4all model: {self._gpt4all_model_name}")
-        print(f"  Path: {model_path}")
+        logger.info(f"Loading gpt4all model: {self._gpt4all_model_name}")
+        logger.info(f"  Path: {model_path}")
         t0 = time.time()
 
         self._model = GPT4All(
@@ -106,7 +109,7 @@ class LLM:
             verbose=False,
         )
 
-        print(f"Loaded in {time.time() - t0:.1f}s")
+        logger.info(f"Loaded in {time.time() - t0:.1f}s")
 
     def _detect_ollama(self) -> bool:
         if requests is None:
@@ -134,12 +137,12 @@ class LLM:
 
             installed = any(model_name in m.get("name", "") for m in models)
             if not installed:
-                print(f"Model '{self._ollama_model}' not found in Ollama.")
-                print(f"Pull it: ollama pull {self._ollama_model}")
-                print(f"Or run: ollama run {self._ollama_model}")
+                logger.error(f"Model '{self._ollama_model}' not found in Ollama.")
+                logger.info(f"Pull it: ollama pull {self._ollama_model}")
+                logger.info(f"Or run: ollama run {self._ollama_model}")
 
-            print(f"Ollama backend: {self._ollama_model}")
-            print(f"  API: {self._ollama_base}")
+            logger.info(f"Ollama backend: {self._ollama_model}")
+            logger.info(f"  API: {self._ollama_base}")
         except requests.exceptions.ConnectionError:
             raise ConnectionError(
                 "Ollama is not running.\n"
@@ -172,8 +175,8 @@ class LLM:
         self._model_path = str(path)
         n_gpu = config.N_GPU_LAYERS
 
-        print(f"Loading GGUF model: {Path(self._model_path).name}")
-        print(f"  Context: {config.N_CTX} | GPU layers: {n_gpu}")
+        logger.info(f"Loading GGUF model: {Path(self._model_path).name}")
+        logger.info(f"  Context: {config.N_CTX} | GPU layers: {n_gpu}")
         t0 = time.time()
 
         self._model = Llama(
@@ -184,7 +187,7 @@ class LLM:
             verbose=False,
         )
 
-        print(f"Loaded in {time.time() - t0:.1f}s")
+        logger.info(f"Loaded in {time.time() - t0:.1f}s")
 
     def generate(
         self,
@@ -223,7 +226,7 @@ class LLM:
                     self.RETRY_BACKOFF_BASE ** attempt,
                     self.MAX_BACKOFF
                 )
-                print(f"[model] Retry {attempt + 1}/{max_retries} after {backoff}s: {error.message}")
+                logger.error(f"[model] Retry {attempt + 1}/{max_retries} after {backoff}s: {error.message}")
                 time.sleep(backoff)
 
         self._retry_stats["failed"] += 1

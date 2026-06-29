@@ -1,4 +1,7 @@
 """Authentication & Authorization System"""
+import logging
+logger = logging.getLogger(__name__)
+
 import os
 import time
 import hashlib
@@ -75,7 +78,7 @@ class AuthManager:
                     if user.api_key:
                         self._api_keys[user.api_key] = user.user_id
             except Exception as e:
-                print(f"[auth] Warning: load failed: {e}")
+                logger.error(f"[auth] Warning: load failed: {e}")
         self._loaded = True
 
     def _save(self):
@@ -86,7 +89,7 @@ class AuthManager:
             with open(self.db_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"[auth] Warning: save failed: {e}")
+            logger.error(f"[auth] Warning: save failed: {e}")
 
     def create_user(self, username: str, role: UserRole = UserRole.BASIC) -> User:
         """Create and persist a new user with the given username and role."""

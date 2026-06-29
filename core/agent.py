@@ -1,3 +1,6 @@
+import logging
+logger = logging.getLogger(__name__)
+
 import json
 import re
 import time
@@ -186,7 +189,7 @@ class Agent:
                         tool_def["func"],
                     ))
         except Exception as e:
-            print(f"[agent] Plugin load: {e}")
+            logger.info(f"[agent] Plugin load: {e}")
 
     def _start_scheduler(self):
         try:
@@ -213,9 +216,9 @@ class Agent:
         return not any(kw in text_lower for kw in _SIMPLE_QUERY_KEYWORDS)
 
     def _on_scheduled_task(self, name: str, prompt: str):
-        print(f"\n[Scheduler] Running: {name}")
+        logger.info(f"\n[Scheduler] Running: {name}")
         result = self.chat(prompt, stream=False)
-        print(f"[Scheduler] Done: {name}")
+        logger.info(f"[Scheduler] Done: {name}")
         return result
 
     def start_new_conversation(self, conversation_id: str = "") -> str:

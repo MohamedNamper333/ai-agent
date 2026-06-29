@@ -1,5 +1,8 @@
 """Text Embedding — with meaningful fallback embedder.
 
+import logging
+logger = logging.getLogger(__name__)
+
 FIX: Original fallback used SHA-256 hash of words → completely random vectors
      with zero semantic meaning. Two words meaning the same thing got
      completely different embeddings.
@@ -33,11 +36,11 @@ class Embedder:
             self._model = SentenceTransformer(name)
             self.dim = self._model.get_sentence_embedding_dimension()
             self._model_name = name
-            print(f"[embedder] Loaded: {name} (dim={self.dim})")
+            logger.info(f"[embedder] Loaded: {name} (dim={self.dim})")
         except ImportError:
-            print("[embedder] sentence-transformers not installed — using TF-IDF fallback")
+            logger.info("[embedder] sentence-transformers not installed — using TF-IDF fallback")
         except Exception as e:
-            print(f"[embedder] sentence-transformers load failed: {e} — using fallback")
+            logger.error(f"[embedder] sentence-transformers load failed: {e} — using fallback")
 
     def _try_ollama(self) -> bool:
         try:
@@ -53,7 +56,7 @@ class Embedder:
                     self._use_ollama = True
                     self._model_name = "ollama/nomic-embed-text"
                     self.dim = len(data["embedding"])
-                    print(f"[embedder] Using Ollama: nomic-embed-text (dim={self.dim})")
+                    logger.info(f"[embedder] Using Ollama: nomic-embed-text (dim={self.dim})")
                     return True
         except Exception:
             pass

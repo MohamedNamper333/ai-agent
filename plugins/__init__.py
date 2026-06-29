@@ -1,5 +1,8 @@
 """Plugin system - auto-discovers and loads plugins from plugins/ directory"""
 
+import logging
+logger = logging.getLogger(__name__)
+
 import importlib.util
 import inspect
 import os
@@ -40,7 +43,7 @@ class PluginRegistry:
                     continue
                 self._load_plugin(f, agent)
 
-        print(f"[plugins] Loaded {len(self.plugins)} plugin(s)")
+        logger.info(f"[plugins] Loaded {len(self.plugins)} plugin(s)")
 
     def _load_plugin(self, filepath: Path, agent: Any):
         try:
@@ -59,7 +62,7 @@ class PluginRegistry:
                     instance.on_load(agent)
                     self.plugins.append(instance)
                     name_str = instance.name or filepath.stem
-                    print(f"[plugins] Loaded: {name_str}")
+                    logger.info(f"[plugins] Loaded: {name_str}")
 
         except Exception as e:
-            print(f"[plugins] Failed to load {filepath.name}: {e}")
+            logger.error(f"[plugins] Failed to load {filepath.name}: {e}")

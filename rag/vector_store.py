@@ -1,5 +1,8 @@
 """VectorStore — with pre-normalized numpy cache.
 
+import logging
+logger = logging.getLogger(__name__)
+
 FIX: Original rebuilt the numpy array on every search call (O(n) per query).
      Now we cache the pre-normalized embedding matrix and rebuild only when
      entries are added/deleted (cache invalidation on mutation).
@@ -243,7 +246,7 @@ class VectorStore:
             with open(self.db_path, "w", encoding="utf-8") as f:
                 json.dump(self.entries, f, ensure_ascii=False)
         except Exception as e:
-            print(f"[vector_store] Warning: save failed: {e}")
+            logger.error(f"[vector_store] Warning: save failed: {e}")
 
     def load(self) -> None:
         if self._loaded:
@@ -254,7 +257,7 @@ class VectorStore:
                     self.entries = json.load(f)
                 self._invalidate_cache()
             except Exception as e:
-                print(f"[vector_store] Warning: load failed: {e}")
+                logger.error(f"[vector_store] Warning: load failed: {e}")
         self._loaded = True
 
     # ─────────────────────────────────────────

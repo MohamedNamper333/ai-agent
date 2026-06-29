@@ -1,5 +1,8 @@
 """AI Agent - CLI interface"""
 
+import logging
+logger = logging.getLogger(__name__)
+
 import argparse
 import sys
 import os
@@ -24,7 +27,7 @@ def print_colored(text: str, color: str = "", end: str = "\n"):
     }
     c = colors.get(color, "")
     r = colors.get("reset", "")
-    print(f"{c}{text}{r}", end=end)
+    logger.info(f"{c}{text}{r}", end=end)
 
 
 def run_cli(args):
@@ -48,7 +51,7 @@ def run_cli(args):
         try:
             user_input = input("\nYou: ").strip()
         except (EOFError, KeyboardInterrupt):
-            print()
+            logger.info()
             break
 
         if not user_input:
@@ -64,8 +67,8 @@ def run_cli(args):
             continue
         elif cmd == "/tools":
             print_colored("── Tools ──", "bold")
-            print(f"Enabled: {agent.tools.get_enabled_count()}/{len(agent.tools.list_all_tools())}")
-            print()
+            logger.info(f"Enabled: {agent.tools.get_enabled_count()}/{len(agent.tools.list_all_tools())}")
+            logger.info()
             cats = agent.tools.list_tools_by_category_all()
             for cat, tools in sorted(cats.items()):
                 statuses = []
@@ -73,12 +76,12 @@ def run_cli(args):
                     icon = "ON" if agent.tools.is_enabled(t.name) else "OFF"
                     statuses.append(f"  {t.name} [{icon}]")
                 label = cat.title()
-                print(f" {label}:")
+                logger.info(f" {label}:")
                 for s in statuses:
-                    print(s)
-                print()
-            print("Usage: /tools enable <name> | /tools disable <name>")
-            print("       /tools on <category> | /tools off <category>")
+                    logger.info(s)
+                logger.info()
+            logger.info("Usage: /tools enable <name> | /tools disable <name>")
+            logger.info("       /tools on <category> | /tools off <category>")
             continue
         elif cmd.startswith("/tools enable "):
             name = cmd[14:].strip()
@@ -120,8 +123,8 @@ def run_cli(args):
 
         print_colored("AI: ", "green", end="")
         for chunk in agent.chat(user_input, stream=True):
-            print(chunk, end="", flush=True)
-        print()
+            logger.info(chunk, end="", flush=True)
+        logger.info()
         print_colored("─" * 50, "bold")
 
 

@@ -1,5 +1,8 @@
 """Conversation Memory - with smart trimming and search"""
 
+import logging
+logger = logging.getLogger(__name__)
+
 import json
 import os
 from datetime import datetime
@@ -177,7 +180,7 @@ class ConversationMemory:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"[memory] Warning: save failed: {e}")
+            logger.error(f"[memory] Warning: save failed: {e}")
 
     def load(self) -> None:
         """Load data from storage."""
@@ -195,7 +198,7 @@ class ConversationMemory:
                 if self.conversations:
                     self.current_id = list(self.conversations.keys())[-1]
             except Exception as e:
-                print(f"[memory] Warning: load failed: {e}")
+                logger.error(f"[memory] Warning: load failed: {e}")
         self._loaded = True
         self._dirty = False
         self._last_save_count = sum(len(msgs) for msgs in self.conversations.values())

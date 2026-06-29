@@ -1,95 +1,113 @@
-# ─────────────────────────────────────────────────────────────
-#  AI Agent — Docker Compose
-#  Services: app, redis (cache - Phase 4)
-#  Usage:
-#    Development:  docker-compose up
-#    Production:   docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
-# ─────────────────────────────────────────────────────────────
-
 version: "3.9"
 
 services:
-
-  # ── Main Application ──────────────────────────────────────
+  # ── AI Agent application ─────────────────────────────────────────
   app:
     build:
       context: .
-      dockerfile: Dockerfile
       target: runtime
-    image: ai-agent:latest
-    container_name: ai-agent-app
-    restart: unless-stopped
     ports:
-      - "${WEB_PORT:-8080}:8080"
-    env_file:
-      - .env
+      - "8080:8080"
     environment:
-      - WEB_HOST=0.0.0.0
-      - WEB_PORT=8080
+      - DATABASE_URL=postgresql+asyncpg://aiagent:${DB_PASSWORD:-secret}@db:5432/aiagent
+      - REDIS_URL=redis://redis:6379/0
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - BACKEND=${BACKEND:-ollama}
-      - OLLAMA_BASE=http://host.docker.internal:11434
-    volumes:
-      # Persistent data — survives container restarts
-      - agent-data:/app/data
-      - agent-logs:/app/logs
-      - agent-models:/app/models
-      # Dev: hot-reload (comment out in production)
-      - .:/app:ro
+      - OLLAMA_BASE=${OLLAMA_BASE:-http://host.docker.internal:11434}
+      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
+      - OPENCODE_ZEN_KEY=${OPENCODE_ZEN_KEY:-}
     depends_on:
+      db:
+        condition: service_healthy
       redis:
         condition: service_healthy
+    volumes:
+      - app_logs:/app/logs
+      - app_models:/app/models
+    restart: unless-stopped
     networks:
-      - agent-net
+      - aiagent-net
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/status"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
 
-  # ── Redis (Cache — Phase 4) ───────────────────────────────
+  # ── PostgreSQL ────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: aiagent
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-secret}
+      POSTGRES_DB: aiagent
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    networks:
+      - aiagent-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aiagent -d aiagent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis (session sharing + task queue) ─────────────────────────
   redis:
     image: redis:7-alpine
-    container_name: ai-agent-redis
-    restart: unless-stopped
-    command: redis-server --save 60 1 --loglevel warning --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
-      - redis-data:/data
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
     networks:
-      - agent-net
+      - aiagent-net
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # ── Nginx reverse proxy (Production) ─────────────────────
-  # Uncomment in Phase 4 when you add SSL
-  # nginx:
-  #   image: nginx:alpine
-  #   container_name: ai-agent-nginx
-  #   restart: unless-stopped
-  #   ports:
-  #     - "80:80"
-  #     - "443:443"
-  #   volumes:
-  #     - ./nginx.conf:/etc/nginx/nginx.conf:ro
-  #     - ./ssl:/etc/nginx/ssl:ro
-  #   depends_on:
-  #     - app
-  #   networks:
-  #     - agent-net
+  # ── Prometheus ────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+    networks:
+      - aiagent-net
+
+  # ── Grafana ───────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - aiagent-net
 
 volumes:
-  agent-data:
-    driver: local
-  agent-logs:
-    driver: local
-  agent-models:
-    driver: local
-  redis-data:
-    driver: local
+  postgres_data:
+  redis_data:
+  app_logs:
+  app_models:
+  prometheus_data:
+  grafana_data:
 
 networks:
-  agent-net:
+  aiagent-net:
     driver: bridge
