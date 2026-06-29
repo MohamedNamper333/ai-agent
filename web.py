@@ -22,7 +22,7 @@ from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Depends, Security
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, WebSocket, WebSocketDisconnect, Depends, Security
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -31,6 +31,8 @@ import uvicorn
 
 from core.model import LLM
 from core.hmac_middleware import AuditMiddleware, get_audit_logger
+from core.websocket_manager import get_ws_manager, ConnectionManager
+from core.deep_learning import TaskClassifier, AnomalyDetector, RLFeedbackEngine, EmbeddingStore
 from core.memory import ConversationMemory
 from core.tools import ToolRegistry
 from core.context import ContextManager
@@ -767,6 +769,48 @@ def run_server(host: str = "", port: int = 0):
     port = port or config.WEB_PORT
     logger.info(f"Web UI: http://{host}:{port}")
     logger.info(f"API Docs: http://{host}:{port}/docs")
+
+@app.websocket("/ws/{room}")
+async def websocket_endpoint(ws: WebSocket, room: str = "default"):
+    """WebSocket endpoint for real-time bidirectional AI agent communication."""
+    import time as _time
+    manager = get_ws_manager()
+    conn_id = await manager.connect(ws, room=room)
+    srv: ServerState = ws.app.state.srv
+    try:
+        while True:
+            data = await ws.receive_json()
+            msg_type = data.get("type", "chat")
+            if msg_type == "chat":
+                message = data.get("message", "").strip()
+                if not message:
+                    await manager.send_error(conn_id, "Empty message")
+                    continue
+                agent = srv.agent
+                try:
+                    for chunk in agent.chat(message, stream=True):
+                        await manager.send_chunk(conn_id, chunk)
+                    await manager.send_done(conn_id)
+                except Exception as exc:
+                    logger.error("WebSocket chat error: %s", exc)
+                    await manager.send_error(conn_id, str(exc))
+            elif msg_type == "ping":
+                await manager.send_json(conn_id, {"type": "pong", "ts": _time.time()})
+            elif msg_type == "feedback":
+                logger.info("WS feedback received: %s", data)
+    except WebSocketDisconnect:
+        manager.disconnect(conn_id)
+    except Exception as exc:
+        logger.error("WebSocket error for %s: %s", conn_id, exc)
+        manager.disconnect(conn_id)
+
+
+@app.get("/ws/stats")
+async def ws_stats():
+    """Return WebSocket connection statistics."""
+    return get_ws_manager().get_stats()
+
+
     uvicorn.run(app, host=host, port=port, log_level="info")
 
 
